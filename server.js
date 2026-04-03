@@ -10,6 +10,7 @@ const spRoutes = require('./routes/serviceProviderRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 const { startCronJobs } = require('./utils/cronJobs');
+const mongoose = require('mongoose'); // at top
 
 connectDB();
 startCronJobs();
@@ -19,6 +20,12 @@ app.use(cors());
 app.use(helmet());
 app.use(express.json());
 
+app.get('/db-status', async (req, res) => {
+  const state = mongoose.connection.readyState;
+  // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+  const status = ['disconnected', 'connected', 'connecting', 'disconnecting'][state];
+  res.json({ mongooseState: status });
+});
 app.get('/ping', (req, res) => res.send('pong'));
 app.post('/echo', (req, res) => res.json(req.body));
 app.use('/uploads', express.static('uploads'));
