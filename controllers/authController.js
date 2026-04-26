@@ -170,8 +170,8 @@ exports.forgotPassword = async (req, res) => {
     if (!account) {
       return res.status(404).json({ error: 'No account found with this mobile number' });
     }
-
-    await sendOtp(mobile, 'reset');
+    
+await sendOtpUtil(mobile, 'reset');
     res.json({ message: 'Reset code sent successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
