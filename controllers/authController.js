@@ -158,8 +158,111 @@ exports.verifyOtp = async (req, res) => {
 };
 
 // ----------------------------------------------------------------------
+// 5. FORGOT PASSWORD – Send reset OTP
+// ----------------------------------------------------------------------
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { mobile } = req.body;
+    if (!mobile) return res.status(400).json({ error: 'Mobile number required' });
+
+    // Check if account exists
+    const account = await Account.findOne({ mobile });
+    if (!account) {
+      return res.status(404).json({ error: 'No account found with this mobile number' });
+    }
+
+    await sendOtp(mobile, 'reset');
+    res.json({ message: 'Reset code sent successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ----------------------------------------------------------------------
+// 6. VERIFY RESET OTP – Returns short-lived reset token
+// ----------------------------------------------------------------------
+exports.verifyResetOtp = async (req, res) => {
+  try {
+    const { mobile, otp } = req.body;
+    if (!mobile || !otp) {
+      return res.status(400).json({ error: 'Mobile and OTP required' });
+    }
+
+    const otpRecord = await OTP.findOne({ mobile, otp, purpose: 'reset' });
+    if (!otpRecord || otpRecord.expiresAt < new Date()) {
+      return res.status(400).json({ error: 'Invalid or expired reset code' });
+    }
+
+    // Delete used OTP
+    await OTP.deleteOne({ _id: otpRecord._id });
+
+    // Generate reset token (short expiry: 15 minutes)
+    const resetToken = jwt.sign(
+      { mobile, purpose: 'reset' },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    res.json({ resetToken });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ----------------------------------------------------------------------
+// 7. RESET PASSWORD – Using reset token
+// ----------------------------------------------------------------------
+exports.resetPassword = async (req, res) => {
+  try {
+    const { resetToken, newPassword, confirmPassword } = req.body;
+
+    if (!resetToken || !newPassword) {
+      return res.status(400).json({ error: 'Reset token and new password required' });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    // Verify reset token
+    let decoded;
+    try {
+      decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired reset token' });
+    }
+
+    if (decoded.purpose !== 'reset') {
+      return res.status(401).json({ error: 'Invalid token purpose' });
+    }
+
+    const { mobile } = decoded;
+
+    // Find account
+    const account = await Account.findOne({ mobile });
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    account.password = hashedPassword;
+    await account.save();
+
+    res.json({ message: 'Password reset successful' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ----------------------------------------------------------------------
 // 4. LOGOUT (optional)
 // ----------------------------------------------------------------------
 exports.logout = (req, res) => {
   res.json({ message: 'Logged out successfully' });
 };
+
