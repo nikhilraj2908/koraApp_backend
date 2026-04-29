@@ -16,14 +16,7 @@ const serviceSchema = new mongoose.Schema(
     description: {
       type: String,
     },
-    icon: {
-      type: String,
-    },
-    color: {
-      type: String,
-      default: '#00BFA5',
-    },
-    pricePerKg: {
+    pricePerPair: {
       type: Number,
       required: true,
       min: 0,

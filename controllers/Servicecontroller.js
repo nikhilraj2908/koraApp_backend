@@ -58,11 +58,11 @@ exports.getServiceBySlug = async (req, res) => {
 
 exports.createService = async (req, res) => {
   try {
-    const { name, slug, description, icon, color, pricePerKg, estimatedHours, sortOrder } =
+    const { name, slug, description, pricePerPair, estimatedHours, sortOrder } =
       req.body;
 
-    if (!name || !slug || pricePerKg === undefined) {
-      return sendError(res, "name, slug, and pricePerKg are required.", 400);
+    if (!name || !slug || pricePerPair === undefined) {
+      return sendError(res, "name, slug, and pricePerPair are required.", 400);
     }
 
     const existing = await Service.findOne({ $or: [{ name }, { slug }] });
@@ -72,9 +72,7 @@ exports.createService = async (req, res) => {
       name,
       slug,
       description,
-      icon,
-      color,
-      pricePerKg,
+      pricePerPair,
       estimatedHours,
       sortOrder,
     });
@@ -97,8 +95,9 @@ exports.createService = async (req, res) => {
 exports.updateService = async (req, res) => {
   try {
     const allowedFields = [
-      "name", "slug", "description", "icon", "color",
-      "pricePerKg", "estimatedHours", "isActive", "sortOrder",
+      "name", "slug", "description", 
+      "pricePerPair", "estimatedHours",
+       "isActive", "sortOrder",
     ];
     const updates = Object.fromEntries(
       Object.entries(req.body).filter(([key]) => allowedFields.includes(key))
@@ -157,9 +156,9 @@ exports.deleteService = async (req, res) => {
 exports.seedServices = async (req, res) => {
   try {
     const seedData = [
-      { name: "Wash",        slug: "wash",      icon: "wash",      color: "#00BFA5", pricePerKg: 30, estimatedHours: 24, sortOrder: 1 },
-      { name: "Iron",        slug: "iron",      icon: "iron",      color: "#F5A623", pricePerKg: 20, estimatedHours: 12, sortOrder: 2 },
-      { name: "Wash + Iron", slug: "wash-iron", icon: "wash-iron", color: "#4CAF50", pricePerKg: 45, estimatedHours: 36, sortOrder: 3 },
+      { name: "Wash",        slug: "wash",      icon: "wash",      color: "#00BFA5", pricePerPair: 30, estimatedHours: 24, sortOrder: 1 },
+      { name: "Iron",        slug: "iron",      icon: "iron",      color: "#F5A623", pricePerPair: 20, estimatedHours: 12, sortOrder: 2 },
+      { name: "Wash + Iron", slug: "wash-iron", icon: "wash-iron", color: "#4CAF50", pricePerPair: 45, estimatedHours: 36, sortOrder: 3 },
     ];
 
     await Promise.all(
