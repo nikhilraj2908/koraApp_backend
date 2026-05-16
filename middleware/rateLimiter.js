@@ -11,12 +11,12 @@ const limiter=(windowMinutes,max,message)=>
     // exports.otpLimiter=limiter(15,5,'Too many otp requests. please wait 15 min and retry again')
     // Sending or verifying an OTP: max 5 attempts per 15 min per IP.
 // Prevents OTP brute-force and Twilio bill abuse.
-exports.otpLimiter = limiter(15, 5, 'Too many OTP requests. Please wait 15 minutes and try again.');
+exports.otpLimiter = limiter(1, 5, 'Too many OTP requests. Please wait 15 minutes and try again.');
 
 // ─── Auth routes (login / register) ──────────────────────────────────────────
 // Max 10 attempts per 15 min per IP.
 // Slows down credential stuffing without blocking legit users.
-exports.authLimiter = limiter(15, 10, 'Too many login attempts. Please wait 15 minutes and try again.');
+exports.authLimiter = limiter(1, 10, 'Too many login attempts. Please wait 15 minutes and try again.');
 
 // ─── Password reset ───────────────────────────────────────────────────────────
 // Max 5 reset attempts per hour per IP.
