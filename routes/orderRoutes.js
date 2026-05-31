@@ -6,7 +6,8 @@ const {
   getActiveOrder,
   getRecentOrders,
   getOrderDetails,
-  updateStatus
+  updateStatus,
+  getOrderHistory
 } = require("../controllers/orderController");
 
 // const authMiddleware = require("../middleware/auth");
@@ -32,6 +33,8 @@ router.get(
   protect,
   getRecentOrders
 );
+
+router.get('/history', protect,getOrderHistory);
 
 // Single order details
 router.get(

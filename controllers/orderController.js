@@ -146,58 +146,6 @@ exports.createOrder = async (req, res) => {
 
 
 
-// Active order
-
-exports.getActiveOrder = async (
-  req,
-  res
-) => {
-
-  try {
-
-    const customerId = req.user.id;
-
-    const activeOrder =
-      await Order.findOne({
-
-        customerId,
-
-        status: {
-          $nin: [
-            "delivered",
-            "cancelled"
-          ]
-        }
-
-      })
-        .sort({
-          createdAt: -1
-        });
-
-    res.json({
-
-      success: true,
-      data: activeOrder
-
-    });
-
-  }
-  catch (error) {
-
-    res.status(500).json({
-
-      success: false,
-      message: error.message
-
-    });
-
-  }
-
-};
-
-
-
-
 // Recent orders
 
 exports.getRecentOrders =
@@ -354,3 +302,134 @@ exports.updateStatus =
     }
 
   };
+  
+  // Helper: convert internal status to user-friendly label
+const getStepLabel = (status) => {
+  const map = {
+    pending_sp: 'Order Placed',
+    sp_assigned: 'SP Assigned',
+    sp_accepted: 'SP Accepted',
+    rider_pickup_assigned: 'Rider Assigned for Pickup',
+    picked_up: 'Order Picked Up',
+    at_sp: 'At Service Provider',
+    cleaned: 'Cleaned',
+    rider_delivery_assigned: 'Out for Delivery',
+    delivered: 'Delivered',
+    cancelled: 'Cancelled'
+  };
+  return map[status] || status;
+};
+
+// Helper: build tracking steps from order.statusHistory
+const buildTrackingSteps = (order) => {
+  const steps = [];
+  const history = order.statusHistory || [];
+  // Order of steps as per your schema
+  const stepOrder = [
+    'pending_sp', 'sp_assigned', 'sp_accepted', 'rider_pickup_assigned',
+    'picked_up', 'at_sp', 'cleaned', 'rider_delivery_assigned', 'delivered', 'cancelled'
+  ];
+
+  for (const stepStatus of stepOrder) {
+    const entry = history.find(h => h.status === stepStatus);
+    const completed = !!entry;
+    const isEstimate = !completed && stepStatus === 'rider_delivery_assigned';
+    let time = '';
+    if (completed && entry?.updatedAt) {
+      time = new Date(entry.updatedAt).toLocaleString();
+    } else if (isEstimate && order.status !== 'delivered' && order.status !== 'cancelled') {
+      // Estimate based on 'cleaned' time or createdAt + 2 hours
+      const baseTime = history.find(h => h.status === 'cleaned')?.updatedAt || order.createdAt;
+      if (baseTime) {
+        const est = new Date(new Date(baseTime).getTime() + 2 * 60 * 60 * 1000);
+        time = `Est. ${est.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' })}`;
+      }
+    }
+    steps.push({
+      label: getStepLabel(stepStatus),
+      time,
+      completed,
+      isEstimate: isEstimate && !completed
+    });
+  }
+
+  // If order is cancelled, show only up to cancelled step
+  if (order.status === 'cancelled') {
+    const cancelIdx = steps.findIndex(s => s.label === 'Cancelled');
+    return steps.slice(0, cancelIdx + 1);
+  }
+  // Show all completed steps + next pending step
+  const currentIdx = steps.findIndex(s => s.label === getStepLabel(order.status));
+  return steps.slice(0, currentIdx + 2);
+};
+
+// GET /api/orders/active
+exports.getActiveOrder = async (req, res) => {
+  try {
+    const activeStatuses = [
+      'pending_sp', 'sp_assigned', 'sp_accepted', 'rider_pickup_assigned',
+      'picked_up', 'at_sp', 'cleaned', 'rider_delivery_assigned'
+    ];
+    const order = await Order.findOne({
+      customerId: req.user.id,
+      status: { $in: activeStatuses }
+    }).sort({ createdAt: -1 });
+
+    if (!order) {
+      return res.status(200).json({ success: true, data: null });
+    }
+
+    // Format order summary
+    const orderSummary = {
+      id: order.orderNumber,
+      service: order.items[0]?.serviceName || 'Laundry',
+      items: order.items.reduce((sum, i) => sum + i.quantity, 0),
+      date: new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      price: order.totalAmount,
+      status: order.status,
+      iconName: 'package-variant'   // generic icon
+    };
+
+    const trackingSteps = buildTrackingSteps(order);
+
+    let cancellationDeadline = null;
+    if (order.createdAt && order.status === 'pending_sp') {
+      cancellationDeadline = new Date(new Date(order.createdAt).getTime() + 2 * 60 * 60 * 1000);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        order: orderSummary,
+        tracking: trackingSteps,
+        cancellationDeadline
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// GET /api/orders/history
+exports.getOrderHistory = async (req, res) => {
+  try {
+    const historyOrders = await Order.find({
+      customerId: req.user.id,
+      status: { $in: ['delivered', 'cancelled'] }
+    }).sort({ createdAt: -1 });
+
+    const formatted = historyOrders.map(order => ({
+      id: order.orderNumber,
+      service: order.items[0]?.serviceName || 'Laundry',
+      items: order.items.reduce((sum, i) => sum + i.quantity, 0),
+      date: new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      price: order.totalAmount,
+      status: order.status === 'delivered' ? 'Delivered' : 'Cancelled',
+      iconName: 'package-variant'
+    }));
+
+    res.json({ success: true, data: formatted });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
