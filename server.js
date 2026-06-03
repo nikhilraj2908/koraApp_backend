@@ -1,9 +1,10 @@
 const dns = require('dns');
-// Force Node.js to use Google's reliable public DNS servers
 dns.setServers(['8.8.8.8', '8.8.4.4']);
 require('dotenv').config();
 
 const express = require('express');
+const { createServer } = require('http');
+const { initSocket } = require('./socket/trackingSocket');  // ← keep only this
 const cors = require('cors');
 const helmet = require('helmet');
 const connectDB = require('./config/db');
@@ -18,22 +19,23 @@ const { startCronJobs } = require('./utils/cronJobs');
 const savedAddressRoutes = require('./routes/savedAddresses');
 const reviewRoutes = require('./routes/reviewRoutes');
 const trackOrderRoutes = require('./routes/Trackorderroutes');
-
-const mongoose = require('mongoose'); // at top
+const mongoose = require('mongoose');
 const { apiLimiter } = require('./middleware/rateLimiter');
 
 connectDB();
 startCronJobs();
 
 const app = express();
+const httpServer = createServer(app);
+
 app.use(cors());
 app.use(helmet());
 app.use(express.json());
 app.set('trust proxy', 1);
 app.use(apiLimiter);
+
 app.get('/db-status', async (req, res) => {
   const state = mongoose.connection.readyState;
-  // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
   const status = ['disconnected', 'connected', 'connecting', 'disconnecting'][state];
   res.json({ mongooseState: status });
 });
@@ -43,7 +45,6 @@ app.use('/uploads', express.static('uploads'));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/customers', customerRoutes);
-
 app.use('/api/riders', riderRoutes);
 app.use('/api/sp', spRoutes);
 app.use('/api/orders', orderRoutes);
@@ -53,5 +54,8 @@ app.use('/api/services', serviceRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/track', trackOrderRoutes);
 
+initSocket(httpServer);  // ← Socket.io is set up inside here
+
+// ↓ httpServer.listen — NOT app.listen
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+httpServer.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
