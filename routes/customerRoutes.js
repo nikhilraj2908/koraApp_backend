@@ -67,4 +67,9 @@ router.put(
   setDefaultAddress
 );
 
+router.patch("/push-token", protect, async (req, res) => {
+  await Customer.findByIdAndUpdate(req.user.id, { expoPushToken: req.body.expoPushToken });
+  res.json({ success: true });
+});
+
 module.exports = router;

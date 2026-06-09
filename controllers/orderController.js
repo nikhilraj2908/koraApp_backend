@@ -1,6 +1,7 @@
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
+const { emitNewOrderToWashers } = require('../socket/trackingSocket');
 
 exports.createOrder = async (req, res) => {
 
@@ -108,7 +109,7 @@ exports.createOrder = async (req, res) => {
       deliveryAddress,
 
       paymentMethod,
-
+      status: "pending_sp",
       statusHistory: [
         {
           status: "pending_sp"
@@ -117,7 +118,7 @@ exports.createOrder = async (req, res) => {
 
     });
 
-
+    emitNewOrderToWashers(order);
     res.status(201).json({
 
       success: true,
@@ -142,9 +143,6 @@ exports.createOrder = async (req, res) => {
   }
 
 }
-
-
-
 
 // Recent orders
 
@@ -411,16 +409,16 @@ exports.getActiveOrder = async (req, res) => {
 
 // GET /api/orders/history
 exports.getOrderHistory = async (req, res) => {
-  
+
   try {
-        console.log("USER ID:", req.user.id);
+    console.log("USER ID:", req.user.id);
 
 
     const historyOrders = await Order.find({
       customerId: req.user.id,
       status: { $in: ['delivered', 'cancelled'] }
     }).sort({ createdAt: -1 });
-        console.log("ORDERS FOUND:", historyOrders.length);
+    console.log("ORDERS FOUND:", historyOrders.length);
 
 
     const formatted = historyOrders.map(order => ({

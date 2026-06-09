@@ -51,6 +51,12 @@ function initSocket(httpServer) {
 
         });
 
+
+        socket.on('join_washer_room', ({ washerId }) => {
+            socket.join(`washer_${washerId}`);
+            console.log(`[Socket] Washer ${washerId} joined their room`);
+        });
+
         /* ─────────────────────────────────────────
            Rider sends location update
            Client emits: rider_location { orderNumber, lat, lng }
@@ -81,8 +87,9 @@ function initSocket(httpServer) {
  */
 function emitOrderUpdate(order) {
     if (!io) return;
-    io.to(`order_${orderNumber}`).emit("order_update", buildOrderPayload(order));
+    io.to(`order_${order.orderNumber}`).emit("order_update", buildOrderPayload(order));
 }
+
 
 /* ── Internal helper: shape the payload ── */
 function buildOrderPayload(order) {
@@ -134,6 +141,20 @@ const STATUS_SEQUENCE = [
     "picked_up", "at_sp", "cleaned", "rider_delivery_assigned", "delivered",
 ];
 
+function emitNewOrderToWashers(order) {
+    if (!io) return;
+    io.emit('new_washer_order', {  // sabhi connected washers ko
+        _id: order._id,
+        orderNumber: order.orderNumber,
+        items: order.items,
+        totalAmount: order.totalAmount,
+        pickupAddress: order.pickupAddress,
+        status: order.status,
+        createdAt: order.createdAt,
+    });
+}
+
+
 function buildTrackingSteps(order) {
     const history = order.statusHistory || [];
     const allSteps = order.status === "cancelled"
@@ -165,4 +186,7 @@ function buildTrackingSteps(order) {
         : steps.slice(0, currentIdx + 2);
 }
 
-module.exports = { initSocket, emitOrderUpdate };
+// initSocket ke andar, io.on("connection") mein ye add karo:
+
+
+module.exports = { initSocket, emitOrderUpdate, emitNewOrderToWashers };

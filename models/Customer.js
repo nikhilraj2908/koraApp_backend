@@ -6,17 +6,17 @@ const CustomerSchema = new mongoose.Schema({
   dob: Date,
   email: String,
   profilePhoto: String,
-  // ... any other customer specific fields
   createdAt: { type: Date, default: Date.now },
   addresses: [{
-  label: String,        // "Home", "Office"
-  addressLine: String,
-  city: String,
-  pincode: String,
-  coordinates: [Number] // [lng, lat]
-}],
-defaultAddressId: mongoose.Schema.Types.ObjectId,
-phone: String,
+    label: String,
+    addressLine: String,
+    city: String,
+    pincode: String,
+    coordinates: [Number]
+  }],
+  defaultAddressId: mongoose.Schema.Types.ObjectId,
+  phone: String,
+  expoPushToken: { type: String, default: null },  // ← andar aaya
 });
 
 module.exports = mongoose.model('Customer', CustomerSchema);
