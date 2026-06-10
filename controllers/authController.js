@@ -42,8 +42,10 @@ exports.register = async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
+    const normalizedMobile = String(mobile).replace(/\D/g, '');
+
     // Check if mobile already exists
-    const existingMobile = await Account.findOne({ mobile });
+    const existingMobile = await Account.findOne({ mobile: normalizedMobile });
     if (existingMobile) {
       return res.status(409).json({ error: 'Mobile already registered' });
     }
@@ -52,11 +54,12 @@ exports.register = async (req, res) => {
 
     const account = await Account.create({
       email: email.toLowerCase(),
-      mobile,
+      mobile: normalizedMobile,
       password: hashedPassword,
       role,
       isVerified: true
     });
+
 
     await createProfile(account._id, role, profileData);
 
@@ -80,11 +83,20 @@ exports.login = async (req, res) => {
 
     let account;
     const isEmail = identifier.includes('@');
+
+    // Store mobile as digits only (no +91). This keeps DB consistent and allows login with or without country code.
+    const normalizedIdentifier = String(identifier).replace(/\D/g, '');
+
     if (isEmail) {
       account = await Account.findOne({ email: identifier.toLowerCase() });
     } else {
-      account = await Account.findOne({ mobile: identifier });
+      // if frontend sends +91XXXXXXXXXX, digitsOnly will be 12 digits; try full digits first, then last 10
+      account = await Account.findOne({ mobile: normalizedIdentifier });
+      if (!account && normalizedIdentifier.length >= 10) {
+        account = await Account.findOne({ mobile: normalizedIdentifier.slice(-10) });
+      }
     }
+
 
     if (!account) {
       return res.status(401).json({ error: 'Invalid email/mobile or password' });
@@ -105,6 +117,7 @@ exports.login = async (req, res) => {
 // ----------------------------------------------------------------------
 // 3. FORGOT PASSWORD – Send OTP to email or mobile
 // ----------------------------------------------------------------------
+
 exports.forgotPassword = async (req, res) => {
   try {
     const { identifier } = req.body;
@@ -118,29 +131,35 @@ exports.forgotPassword = async (req, res) => {
     if (isEmail) {
       account = await Account.findOne({ email: identifier.toLowerCase() });
     } else {
-      account = await Account.findOne({ mobile: identifier });
+      // Normalise mobile to 10 digits (no +91) for DB lookup
+      const rawDigits = identifier.replace(/\D/g, '');
+      const mobileDigits = rawDigits.slice(-10);
+      account = await Account.findOne({ mobile: mobileDigits });
     }
 
     if (!account) {
       return res.status(404).json({ error: 'No account found with this email or mobile' });
     }
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Store OTP (overwrite any existing for same contact & purpose)
+    // Store OTP using correct field 'contact'
+    // Fixed deprecation warning: use returnDocument: 'after' instead of new: true
     await OTP.findOneAndUpdate(
       { contact: identifier, purpose: 'reset' },
       { otp, expiresAt },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // Send OTP
     if (isEmail) {
       await sendEmailOtp(identifier, otp);
     } else {
-      await sendOtpSms(identifier, 'reset'); // assumes your SMS util accepts mobile and purpose
+      // Convert to E.164 format for Twilio (add +91 if missing)
+      const rawMobile = identifier.replace(/\D/g, '').slice(-10);
+      const e164Mobile = `+91${rawMobile}`;
+      await sendOtpSms(e164Mobile, otp);
     }
 
     res.json({ message: `OTP sent to your ${isEmail ? 'email' : 'mobile'}` });

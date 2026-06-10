@@ -21,9 +21,9 @@ const sendOtp = async (mobile, purpose = 'login') => {
     });
 
     await OTP.findOneAndUpdate(
-      { mobile, purpose },   // include purpose in query
+      { contact: mobile, purpose },
       { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
-      { upsert: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     console.log(`OTP sent to ${mobile} for ${purpose}: ${otp}`);
