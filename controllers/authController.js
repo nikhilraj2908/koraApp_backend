@@ -231,11 +231,12 @@ exports.resetPassword = async (req, res) => {
     const { identifier } = decoded;
     let account;
 
-    if (identifier.includes('@')) {
-      account = await Account.findOne({ email: identifier.toLowerCase() });
-    } else {
-      account = await Account.findOne({ mobile: identifier });
-    }
+   if (identifier.includes('@')) {
+  account = await Account.findOne({ email: identifier.toLowerCase() });
+} else {
+  const normalizedMobile = identifier.replace(/\D/g, '').slice(-10); // "8821051303"
+  account = await Account.findOne({ mobile: normalizedMobile }); // ✅ matches DB
+}
 
     if (!account) {
       return res.status(404).json({ error: 'Account not found' });
