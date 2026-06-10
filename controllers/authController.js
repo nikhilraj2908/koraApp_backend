@@ -12,6 +12,8 @@ const generateToken = (accountId, role) => {
   return jwt.sign({ id: accountId, role }, process.env.JWT_SECRET, { expiresIn: '30d' });
 };
 
+// Helper function — add at top of authController.js
+const normalizeMobile = (mobile) => String(mobile).replace(/\D/g, '').slice(-10);
 const createProfile = async (accountId, role, profileData) => {
   switch (role) {
     case 'customer':
@@ -42,7 +44,9 @@ exports.register = async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    const normalizedMobile = String(mobile).replace(/\D/g, '');
+    // const normalizedMobile = String(mobile).replace(/\D/g, '');
+    // In register controller
+const normalizedMobile = String(mobile).replace(/\D/g, '').slice(-10); // ✅ always 10 digits
 
     // Check if mobile already exists
     const existingMobile = await Account.findOne({ mobile: normalizedMobile });
