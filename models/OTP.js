@@ -1,12 +1,27 @@
-// models/OTP.js
 const mongoose = require('mongoose');
 
-const otpSchema = new mongoose.Schema({
-  accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true },
-  purpose: { type: String, enum: ['email_change', 'mobile_change', 'password_reset'], required: true },
-  newValue: { type: String, required: true }, // new email or mobile number
-  otp: { type: String, required: true },
-  expiresAt: { type: Date, required: true },
-  createdAt: { type: Date, default: Date.now, expires: 600 } // TTL index 10 min
+const OTPSchema = new mongoose.Schema({
+  contact: { 
+    type: String, 
+    required: true,
+    index: true           // for faster lookups by contact
+  },
+  otp: { 
+    type: String, 
+    required: true 
+  },
+  purpose: { 
+    type: String, 
+    enum: ['login', 'reset'], 
+    default: 'login' 
+  },
+  expiresAt: { 
+    type: Date, 
+    required: true 
+  }
 });
-module.exports = mongoose.model('OTP', otpSchema);
+
+// Auto-delete expired OTPs (TTL index)
+OTPSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+module.exports = mongoose.model('OTP', OTPSchema);
