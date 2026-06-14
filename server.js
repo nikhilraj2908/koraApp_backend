@@ -19,6 +19,8 @@ const { startCronJobs } = require('./utils/cronJobs');
 const savedAddressRoutes = require('./routes/savedAddresses');
 const reviewRoutes = require('./routes/reviewRoutes');
 const trackOrderRoutes = require('./routes/trackOrderRoutes');
+const complaintRoutes = require('./routes/complaintRoutes');
+const complaintCategoryRoutes = require('./routes/complaintCategoryRoutes');
 
 const mongoose = require('mongoose'); // at top
 const { apiLimiter } = require('./middleware/rateLimiter');
@@ -54,6 +56,9 @@ app.use('/api/saved-addresses', savedAddressRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/track', trackOrderRoutes);
+
+app.use('/api/complaints', complaintRoutes);
+app.use('/api/complaint-categories', complaintCategoryRoutes);
 
 initSocket(httpServer);  // ← Socket.io is set up inside here
 

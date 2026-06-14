@@ -4,7 +4,12 @@ const OTP = require('../models/OTP');
 const bcrypt = require('bcrypt');
 const sendEmailOtp = require('../utils/sendEmail'); // adjust path
 const sendSmsOtp = require('../utils/sendOtp');   // adjust path
-
+const formatPhone = (phone) => {
+  let cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length === 10) return '+91' + cleaned;      // India
+  if (phone.startsWith('+')) return phone;
+  return '+' + cleaned;
+};
 // Helper functions
 const ok = (res, data, code = 200) => res.status(code).json({ success: true, data });
 const fail = (res, msg, code = 500) => res.status(code).json({ success: false, message: msg });
@@ -121,8 +126,10 @@ exports.verifyEmailOtp = async (req, res) => {
 // ─── REQUEST MOBILE CHANGE OTP ───────────────────────────────────────────
 exports.requestMobileOtp = async (req, res) => {
   try {
-    const { newMobile } = req.body;
+    let { newMobile } = req.body;                     // ✅ use let
     if (!newMobile) return fail(res, 'New mobile number required', 400);
+
+    newMobile = formatPhone(newMobile);               // ✅ format here
 
     // Check if mobile already exists in Customer collection
     const existingCustomer = await Customer.findOne({ phone: newMobile });
@@ -137,16 +144,17 @@ exports.requestMobileOtp = async (req, res) => {
     await OTP.create({
       accountId: req.user.id,
       purpose: 'mobile_change',
-      newValue: newMobile,
+      newValue: newMobile,    // ✅ store formatted
       otp,
       expiresAt,
     });
 
     // Send OTP via SMS
-    await sendSmsOtp(newMobile, otp);
+    await sendSmsOtp(newMobile, otp);   // ✅ send formatted
 
     return ok(res, { message: 'OTP sent to new mobile number' });
   } catch (err) {
+    console.error(err);                 // ✅ log for debugging
     return fail(res, err.message);
   }
 };
@@ -154,8 +162,9 @@ exports.requestMobileOtp = async (req, res) => {
 // ─── VERIFY MOBILE CHANGE OTP ────────────────────────────────────────────
 exports.verifyMobileOtp = async (req, res) => {
   try {
-    const { newMobile, otp } = req.body;
+    let { newMobile, otp } = req.body;
     if (!newMobile || !otp) return fail(res, 'New mobile and OTP required', 400);
+    newMobile = formatPhone(newMobile);   // ✅ format
 
     const record = await OTP.findOne({
       accountId: req.user.id,
@@ -169,17 +178,15 @@ exports.verifyMobileOtp = async (req, res) => {
     const customer = await Customer.findOne({ accountId: req.user.id });
     if (!customer) return fail(res, 'Profile not found', 404);
 
-    customer.phone = newMobile;
+    customer.phone = newMobile;           // ✅ store formatted
     await customer.save();
 
     await OTP.deleteOne({ _id: record._id });
-
     return ok(res, { mobile: customer.phone });
   } catch (err) {
     return fail(res, err.message);
   }
 };
-
 // ... other existing address methods unchanged ...
 
 // ─── POST /api/customers/addresses ──────────────────────────────────────────
