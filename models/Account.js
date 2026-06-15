@@ -20,7 +20,7 @@ const AccountSchema = new mongoose.Schema({
   },
   role: { 
     type: String, 
-    enum: ['customer', 'rider', 'serviceProvider'], 
+    enum: ['customer', 'rider', 'serviceProvider','admin'], 
     required: true 
   },
   isVerified: { 

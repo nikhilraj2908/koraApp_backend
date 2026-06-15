@@ -19,8 +19,8 @@ const { startCronJobs } = require('./utils/cronJobs');
 const savedAddressRoutes = require('./routes/savedAddresses');
 const reviewRoutes = require('./routes/reviewRoutes');
 const trackOrderRoutes = require('./routes/trackOrderRoutes');
-const washerRoutes = require("./routes/washerRoutes");
-const mongoose = require('mongoose');
+
+const mongoose = require('mongoose'); // at top
 const { apiLimiter } = require('./middleware/rateLimiter');
 
 connectDB();
@@ -63,8 +63,8 @@ app.use('/api/saved-addresses', savedAddressRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/track', trackOrderRoutes);
-app.use("/api/washer", washerRoutes);
-app.use('/api/riders', riderRoutes);
+
+initSocket(httpServer);  // ← Socket.io is set up inside here
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));

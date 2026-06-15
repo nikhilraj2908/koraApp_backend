@@ -3,12 +3,12 @@ const Customer = require('../models/Customer');
 
 const {
   getProfile,
+   requestEmailOtp, verifyEmailOtp, requestMobileOtp, verifyMobileOtp,
   updateProfile,
   addAddress,
   updateAddress,
   deleteAddress,
   setDefaultAddress,
-  updateEmail
 } = require('../controllers/customerController');
 
 const { protect, restrictTo } = require('../middleware/auth');
@@ -17,22 +17,61 @@ const router = express.Router();
 
 // ─── PROFILE ─────────────────────────────────────────────
 
-router.get('/profile', protect, restrictTo('customer'), getProfile);
-router.put('/profile', protect, restrictTo('customer'), updateProfile);
-router.put('/profile/email', protect, restrictTo('customer'), updateEmail);
+// Get logged-in customer profile
+router.get(
+  '/profile',
+  protect,
+  restrictTo('customer'),
+  getProfile
+);
+
+// Update logged-in customer profile
+router.put(
+  '/profile',
+  protect,
+  restrictTo('customer'),
+  updateProfile
+);
+
 
 // ─── ADDRESSES ───────────────────────────────────────────
 
-router.post('/addresses', protect, restrictTo('customer'), addAddress);
-router.put('/addresses/:addressId', protect, restrictTo('customer'), updateAddress);
-router.delete('/addresses/:addressId', protect, restrictTo('customer'), deleteAddress);
-router.put('/addresses/:addressId/default', protect, restrictTo('customer'), setDefaultAddress);
+// Add address
+router.post(
+  '/addresses',
+  protect,
+  restrictTo('customer'),
+  addAddress
+);
 
-// ─── PUSH TOKEN ──────────────────────────────────────────
+// Update address
+router.put(
+  '/addresses/:addressId',
+  protect,
+  restrictTo('customer'),
+  updateAddress
+);
 
-router.patch('/push-token', protect, async (req, res) => {
-  await Customer.findByIdAndUpdate(req.user.id, { expoPushToken: req.body.expoPushToken });
-  res.json({ success: true });
-});
+// Delete address
+router.delete(
+  '/addresses/:addressId',
+  protect,
+  restrictTo('customer'),
+  deleteAddress
+);
 
+// Set default address
+router.put(
+  '/addresses/:addressId/default',
+  protect,
+  restrictTo('customer'),
+  setDefaultAddress
+);
+
+router.put(
+  '/profile/email',
+  protect,
+  restrictTo('customer'),
+  updateEmail
+);
 module.exports = router;

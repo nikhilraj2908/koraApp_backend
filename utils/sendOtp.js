@@ -9,29 +9,13 @@ const client = twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
-const sendOtp = async (mobile, purpose = 'login') => {
-  const otp = generateOtp();
+const sendOtp = async (mobile, otp) => {
   const message = `Your KORA verification code is: ${otp}. Valid for 10 minutes.`;
-
-  try {
-    await client.messages.create({
-      body: message,
-      to: mobile,
-      from: process.env.TWILIO_PHONE
-    });
-
-    await OTP.findOneAndUpdate(
-      { mobile, purpose },   // include purpose in query
-      { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
-      { upsert: true }
-    );
-
-    console.log(`OTP sent to ${mobile} for ${purpose}: ${otp}`);
-    return otp;
-  } catch (error) {
-    console.error('Twilio error:', error);
-    throw new Error('Failed to send OTP');
-  }
+  await client.messages.create({
+    body: message,
+    to: mobile,
+    from: process.env.TWILIO_PHONE
+  });
 };
 
 module.exports = sendOtp;
