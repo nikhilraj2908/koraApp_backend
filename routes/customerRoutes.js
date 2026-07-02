@@ -68,10 +68,10 @@ router.put(
   setDefaultAddress
 );
 
-router.put(
-  '/profile/email',
-  protect,
-  restrictTo('customer'),
-  updateEmail
-);
+// router.put(
+//   '/profile/email',
+//   protect,
+//   restrictTo('customer'),
+//   updateEmail
+// );
 module.exports = router;
