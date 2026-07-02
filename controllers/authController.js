@@ -65,7 +65,6 @@ exports.register = async (req, res) => {
   try {
     const { email, mobile, password, role, ...profileData } = req.body;
 
-    // Basic validation
     if (!email || !mobile || !password || !role) {
       return res.status(400).json({ error: 'Email, mobile, password and role are required' });
     }
@@ -73,7 +72,6 @@ exports.register = async (req, res) => {
       return res.status(400).json({ error: 'Full name is required' });
     }
 
-    // Check uniqueness
     const existingEmail = await Account.findOne({ email: email.toLowerCase() });
     if (existingEmail) {
       return res.status(409).json({ error: 'Email already registered' });
@@ -85,24 +83,20 @@ exports.register = async (req, res) => {
       return res.status(409).json({ error: 'Mobile already registered' });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create account as UNVERIFIED
     const account = await Account.create({
       email: email.toLowerCase(),
       mobile: normalizedMobile,
       password: hashedPassword,
       role,
-      isVerified: false,                      // 👈 wait for email OTP
+      isVerified: false,
     });
 
-    // Create corresponding profile (Customer/Rider/ServiceProvider)
     await createProfile(account._id, role, profileData);
 
-    // Generate and send email verification OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await OTP.findOneAndUpdate(
       { contact: account.email, purpose: 'verify' },
@@ -110,13 +104,17 @@ exports.register = async (req, res) => {
       { upsert: true, returnDocument: 'after' }
     );
 
-    await sendEmailOtp(account.email, otp);
-
-    // Return success – do NOT log the user in
+    // ✅ Respond immediately — don't await the email
     res.status(201).json({
       message: 'Registration successful. Please verify your email with the OTP sent.',
       email: account.email,
     });
+
+    // ✅ Send email AFTER responding — fire and forget
+    sendEmailOtp(account.email, otp).catch(err =>
+      console.error('[register] Failed to send OTP email:', err)
+    );
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

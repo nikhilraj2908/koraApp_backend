@@ -1,16 +1,27 @@
-const nodemailer = require('nodemailer');
+const nodemailer = require("nodemailer");
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail', // or your SMTP
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
 const sendEmailOtp = async (to, otp) => {
-  await transporter.sendMail({
+  console.log("Before sendMail");
+
+  const info = await transporter.sendMail({
     from: `"Kora App" <${process.env.EMAIL_USER}>`,
     to,
-    subject: 'Password Reset OTP',
-    html: `<p>Your OTP for password reset is <b>${otp}</b>. It expires in 10 minutes.</p>`,
+    subject: "Verify Email OTP",
+    html: `<p>Your OTP is <b>${otp}</b></p>`,
   });
+
+  console.log("After sendMail");
+  console.log(info);
+
+  return info;
 };
+
 module.exports = sendEmailOtp;
