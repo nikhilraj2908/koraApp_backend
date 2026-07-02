@@ -13,7 +13,9 @@ exports.createOrder = async (req, res) => {
       items,
       pickupAddress,
       deliveryAddress,
-      paymentMethod
+      paymentMethod,
+      pickupDay,   // ← add
+      timeSlot
     } = req.body;
 
 
@@ -87,36 +89,36 @@ exports.createOrder = async (req, res) => {
     const orderNumber =
       `KR${Date.now()}`;
 
+    let pickupScheduledAt = null;
+    if (pickupDay && timeSlot) {
+      const match = timeSlot.match(/(\d+):(\d+) (AM|PM)/);
+      if (match) {
+        let hour = parseInt(match[1]);
+        const period = match[3];
+        if (period === "PM" && hour !== 12) hour += 12;
+        if (period === "AM" && hour === 12) hour = 0;
+        pickupScheduledAt = new Date(
+          `${pickupDay}T${String(hour).padStart(2, "0")}:00:00`
+        );
+      }
+    }
 
     const order = await Order.create({
-
       customerId,
-
       orderNumber,
-
       items: finalItems,
-
       subtotal,
-
       tax,
-
       discount,
-
       totalAmount,
-
       pickupAddress,
-
       deliveryAddress,
-
       paymentMethod,
+      pickupScheduledAt,   // ← yeh add karo
       status: "pending_sp",
-      statusHistory: [
-        {
-          status: "pending_sp"
-        }
-      ]
-
+      statusHistory: [{ status: "pending_sp" }]
     });
+
 
     emitNewOrderToWashers(order);
     res.status(201).json({
@@ -200,7 +202,6 @@ exports.getOrderDetails =
 
       const order = await Order.findOne({ orderNumber: req.params.id }); // ← yeh badla
 
-
       if (!order) {
 
         return res.status(404)
@@ -213,7 +214,6 @@ exports.getOrderDetails =
           });
 
       }
-
       res.json({
 
         success: true,

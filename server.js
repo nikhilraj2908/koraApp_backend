@@ -4,7 +4,7 @@ require('dotenv').config();
 
 const express = require('express');
 const { createServer } = require('http');
-const { initSocket, getIO } = require('./socket/trackingSocket'); 
+const { initSocket, getIO } = require('./socket/trackingSocket');
 const cors = require('cors');
 const helmet = require('helmet');
 const connectDB = require('./config/db');
@@ -19,8 +19,10 @@ const { startCronJobs } = require('./utils/cronJobs');
 const savedAddressRoutes = require('./routes/savedAddresses');
 const reviewRoutes = require('./routes/reviewRoutes');
 const trackOrderRoutes = require('./routes/trackOrderRoutes');
-
-const mongoose = require('mongoose'); // at top
+const washerRoutes = require('./routes/washerRoutes');
+const complaintRoutes = require('./routes/complaintRoutes');
+const complaintCategoryRoutes = require('./routes/complaintCategoryRoutes');
+const mongoose = require('mongoose');
 const { apiLimiter } = require('./middleware/rateLimiter');
 
 connectDB();
@@ -35,12 +37,12 @@ app.use(express.json());
 app.set('trust proxy', 1);
 app.use(apiLimiter);
 
-// ── initSocket pehle karo ──
+// Initialize Socket.IO
 initSocket(httpServer);
 
-// ── io ko req mein attach karo — ROUTES SE PEHLE ──
+// Make io available in every request
 app.use((req, res, next) => {
-  req.io = getIO();  // ← getIO() se instance lo
+  req.io = getIO();
   next();
 });
 
@@ -49,8 +51,10 @@ app.get('/db-status', async (req, res) => {
   const status = ['disconnected', 'connected', 'connecting', 'disconnecting'][state];
   res.json({ mongooseState: status });
 });
+
 app.get('/ping', (req, res) => res.send('pong'));
 app.post('/echo', (req, res) => res.json(req.body));
+
 app.use('/uploads', express.static('uploads'));
 
 app.use('/api/auth', authRoutes);
@@ -63,8 +67,12 @@ app.use('/api/saved-addresses', savedAddressRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/track', trackOrderRoutes);
-
-initSocket(httpServer);  // ← Socket.io is set up inside here
+app.use('/api/washer', washerRoutes);
+app.use('/api/complaints', complaintRoutes);
+app.use('/api/complaint-categories', complaintCategoryRoutes);
 
 const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+});
