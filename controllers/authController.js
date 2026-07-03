@@ -241,66 +241,54 @@ exports.login = async (req, res) => {
 // ─── 5. GOOGLE AUTH (sign‑up / login) — Authorization Code + PKCE ──
 exports.googleAuth = async (req, res) => {
   try {
-    const { code, codeVerifier, redirectUri } = req.body;
+    const { idToken } = req.body;
 
-    if (!code || !codeVerifier || !redirectUri) {
-      return res.status(400).json({ error: 'code, codeVerifier and redirectUri are required' });
+    if (!idToken) {
+      return res.status(400).json({ message: "Google token missing" });
     }
 
-    // 1. Exchange the code for tokens using PKCE — no client secret needed
-    const tokenResponse = await axios.post(`https://${AUTH0_DOMAIN}/oauth/token`, {
-      grant_type: 'authorization_code',
-      client_id: AUTH0_CLIENT_ID,
-      code,
-      code_verifier: codeVerifier,
-      redirect_uri: redirectUri,
-    });
+    // verify token from Auth0
+    const claims = await verifyAuth0IdToken(idToken);
 
-    const { id_token } = tokenResponse.data;
-    if (!id_token) {
-      return res.status(400).json({ error: 'Failed to obtain ID token from Auth0' });
-    }
-
-    // 2. Verify the ID token signature + claims — never trust the client for identity
-    const claims = await verifyAuth0IdToken(id_token);
-    const { sub: googleId, email, name: fullName, picture: profilePhoto } = claims;
+    const email = claims.email;
+    const name = claims.name;
+    const picture = claims.picture;
+    const googleId = claims.sub;
 
     if (!email) {
-      return res.status(400).json({ error: 'Google account has no email' });
+      return res.status(400).json({ message: "No email from Google" });
     }
 
-    // 3. Find or create account using VERIFIED claims only
-    let account = await Account.findOne({ $or: [{ googleId }, { email: email.toLowerCase() }] });
+    // STEP 1: find user
+    let user = await Account.findOne({ email });
 
-    if (account) {
-      if (!account.googleId) {
-        account.googleId = googleId;
-        account.isVerified = true;
-        await account.save();
-      }
-      const token = generateToken(account._id, account.role);
-      return res.json({ token, role: account.role });
+    // STEP 2: if not exist → create (SIGNUP)
+    if (!user) {
+      user = await Account.create({
+        email,
+        googleId,
+        role: "customer",
+        isVerified: true,
+        password: null,
+      });
+
+      await createProfile(user._id, "customer", {
+        fullName: name || "Google User",
+        profilePhoto: picture || "",
+      });
     }
 
-    const newAccount = await Account.create({
-      email: email.toLowerCase(),
-      googleId,
-      role: 'customer',
-      isVerified: true,
-      password: null,
-      mobile: null,
-    });
+    // STEP 3: login (same flow for signup + login)
+    const token = generateToken(user._id, user.role);
 
-    await createProfile(newAccount._id, newAccount.role, {
-      fullName: fullName || 'Google User',
-      profilePhoto: profilePhoto || '',
+    return res.json({
+      token,
+      role: user.role,
+      user,
     });
-
-    const token = generateToken(newAccount._id, newAccount.role);
-    res.status(201).json({ token, role: newAccount.role });
   } catch (err) {
-    console.error('Google auth error:', err?.response?.data || err.message);
-    res.status(500).json({ error: 'Google authentication failed' });
+    console.error("Google Auth Error:", err);
+    res.status(500).json({ message: "Google login failed" });
   }
 };
 
