@@ -5,6 +5,7 @@ const {
   getProfile,
    requestEmailOtp, verifyEmailOtp, requestMobileOtp, verifyMobileOtp,
   updateProfile,
+  setInitialMobile,
   addAddress,
   updateAddress,
   deleteAddress,
@@ -31,6 +32,14 @@ router.put(
   protect,
   restrictTo('customer'),
   updateProfile
+);
+
+// Set mobile number for the first time (onboarding, unverified — no OTP)
+router.put(
+  '/profile/set-initial-mobile',
+  protect,
+  restrictTo('customer'),
+  setInitialMobile
 );
 
 

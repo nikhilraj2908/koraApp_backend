@@ -61,6 +61,38 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
+// ─── SET INITIAL MOBILE (onboarding, unverified) ──────────────────────────
+// Used right after Google sign-up/login, where we don't have a mobile
+// number yet. Deliberately skips OTP verification — this is just so a
+// rider can call the customer. Only writes Customer.phone (not
+// Account.mobile), so it can't collide with Account's unique mobile index.
+exports.setInitialMobile = async (req, res) => {
+  try {
+    let { mobile } = req.body;
+    if (!mobile) return fail(res, 'Mobile number is required', 400);
+
+    mobile = formatPhone(mobile.trim());
+
+    const digitsOnly = mobile.replace(/\D/g, '');
+    if (digitsOnly.length < 10) {
+      return fail(res, 'Enter a valid mobile number', 400);
+    }
+
+    const customer = await Customer.findOneAndUpdate(
+      { accountId: req.user.id },
+      { $set: { phone: mobile } },
+      { returnDocument: 'after', runValidators: true }
+    );
+
+    if (!customer) return fail(res, 'Profile not found', 404);
+
+    return ok(res, { phone: customer.phone });
+  } catch (err) {
+    console.error('setInitialMobile error:', err);
+    return fail(res, err.message);
+  }
+};
+
 // ─── REQUEST EMAIL CHANGE OTP ────────────────────────────────────────────
 exports.requestEmailOtp = async (req, res) => {
   try {
