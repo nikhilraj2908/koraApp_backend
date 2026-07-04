@@ -10,10 +10,14 @@ const AccountSchema = new mongoose.Schema({
   },
   mobile: {
     type: String,
-    unique: true,
-    sparse: true,        // allows multiple nulls but ensures uniqueness for non-null values
     trim: true,
     // required: false   // now optional (users can add later)
+    // NOTE: the unique index for this field is defined explicitly below
+    // as a PARTIAL index, not via `unique`/`sparse` here. `sparse: true`
+    // still enforces uniqueness across documents where mobile is
+    // explicitly `null` (it only skips documents missing the field
+    // entirely) — a partial index with $type: "string" is safer and
+    // ignores both missing and null values.
   },
   password: {
     type: String,
@@ -57,6 +61,14 @@ const AccountSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+AccountSchema.index(
+  { mobile: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { mobile: { $type: 'string' } },
+  }
+);
 
 // Ensure either password or googleId is present (optional validation)
 // Ensure either password or googleId is present

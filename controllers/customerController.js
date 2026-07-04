@@ -64,8 +64,10 @@ exports.updateProfile = async (req, res) => {
 // ─── SET INITIAL MOBILE (onboarding, unverified) ──────────────────────────
 // Used right after Google sign-up/login, where we don't have a mobile
 // number yet. Deliberately skips OTP verification — this is just so a
-// rider can call the customer. Only writes Customer.phone (not
-// Account.mobile), so it can't collide with Account's unique mobile index.
+// rider can call the customer. Writes Account.mobile (the same field
+// manual email/password sign-ups use), keeping one canonical place for
+// the primary contact number. Customer.phone is left alone — it's only
+// used by the separate "change mobile via OTP" feature.
 exports.setInitialMobile = async (req, res) => {
   try {
     let { mobile } = req.body;
@@ -78,15 +80,24 @@ exports.setInitialMobile = async (req, res) => {
       return fail(res, 'Enter a valid mobile number', 400);
     }
 
-    const customer = await Customer.findOneAndUpdate(
-      { accountId: req.user.id },
-      { $set: { phone: mobile } },
-      { returnDocument: 'after', runValidators: true }
-    );
+    let account;
+    try {
+      account = await Account.findByIdAndUpdate(
+        req.user.id,
+        { $set: { mobile } },
+        { new: true, runValidators: true }
+      );
+    } catch (err) {
+      // Duplicate mobile across two different accounts -> fail gracefully
+      if (err.code === 11000 && err.keyPattern?.mobile) {
+        return fail(res, 'This mobile number is already linked to another account', 409);
+      }
+      throw err;
+    }
 
-    if (!customer) return fail(res, 'Profile not found', 404);
+    if (!account) return fail(res, 'Account not found', 404);
 
-    return ok(res, { phone: customer.phone });
+    return ok(res, { mobile: account.mobile });
   } catch (err) {
     console.error('setInitialMobile error:', err);
     return fail(res, err.message);
