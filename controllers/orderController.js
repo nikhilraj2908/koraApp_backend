@@ -1,7 +1,7 @@
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
-const Wallet = require("../models/walletcustomer");
+const Wallet = require("../models/WalletCustomer");
 const { emitNewOrderToWashers } = require('../socket/trackingSocket');
 
 // ── Cancellation & Refund Policy constants (see Terms §8.1–8.5) ──────────────
