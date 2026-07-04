@@ -141,6 +141,33 @@ const OrderSchema = new mongoose.Schema({
     type: String,
     enum: ["pending", "paid", "failed"],
     default: "pending"
+  },
+
+  cancellation: {
+    cancelledAt: Date,
+    cancelledBy: {
+      type: String,
+      enum: ["customer", "admin", "system"],
+    },
+    isFreeCancellation: Boolean,
+    cancellationFee: {
+      type: Number,
+      default: 0,
+    },
+    refundAmount: {
+      type: Number,
+      default: 0,
+    },
+    refundMode: {
+      type: String,
+      enum: ["wallet_credit", "coupon", "none"],
+      default: "none",
+    },
+    refundStatus: {
+      type: String,
+      enum: ["not_applicable", "processing", "completed"],
+      default: "not_applicable",
+    },
   }
 
 },

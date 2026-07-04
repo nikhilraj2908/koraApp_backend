@@ -7,7 +7,8 @@ const {
   getRecentOrders,
   getOrderDetails,
   updateStatus,
-  getOrderHistory
+  getOrderHistory,
+  cancelOrder
 } = require("../controllers/orderController");
 
 // const authMiddleware = require("../middleware/auth");
@@ -48,6 +49,13 @@ router.put(
   "/:id/status",
   protect,
   updateStatus
+);
+
+// Cancel order (dedicated, policy-enforced — Terms §8.1–8.5)
+router.post(
+  "/:id/cancel",
+  protect,
+  cancelOrder
 );
 
 
