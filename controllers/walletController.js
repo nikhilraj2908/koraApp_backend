@@ -1,4 +1,4 @@
-const Wallet = require("../models/Wallet");
+const Wallet = require("../models/walletcustomer");
 const Customer = require("../models/Customer");
 
 // GET /api/wallet — balance + transaction history for the logged-in customer
