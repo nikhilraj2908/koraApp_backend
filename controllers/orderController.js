@@ -1,23 +1,8 @@
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
-const Wallet = require("../models/WalletCustomer");
+const WalletTransaction = require("../models/WalletCustomer");
 const { emitNewOrderToWashers } = require('../socket/trackingSocket');
-
-// ── Cancellation & Refund Policy constants (see Terms §8.1–8.5) ──────────────
-const FREE_CANCELLATION_WINDOW_MS = 2 * 60 * 60 * 1000; // §8.1 — 2 hours
-const LATE_CANCELLATION_FEE = 50; // §8.2 — ₹50
-
-// Once an order reaches any of these statuses, pickup has already started,
-// so this is no longer a simple, policy-driven self-cancel (§8.1 only applies
-// "if pickup has not started"); route the customer to support instead.
-const PICKUP_STARTED_STATUSES = [
-  "picked_up",
-  "at_sp",
-  "cleaned",
-  "rider_delivery_assigned",
-  "delivered",
-];
 
 exports.createOrder = async (req, res) => {
 
@@ -253,6 +238,116 @@ exports.getOrderDetails =
   };
 
 
+// ─────────────────────────────────────────────────────────────
+// CANCEL ORDER (Customer-initiated)
+// Implements Cancellation & Refund Policy §8:
+//   8.1 Free cancellation within 2 hours of placement, if pickup hasn't started
+//   8.2 Late cancellation (after 2 hours, still before pickup) → ₹50 fee
+//   8.4 Refund issued as wallet credit (Company's discretion)
+//   8.5 No cancellation once the service has actually started (picked up) —
+//       from that point on, only a damage complaint can lead to a refund.
+// ─────────────────────────────────────────────────────────────
+const FREE_CANCELLATION_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
+const LATE_CANCELLATION_FEE = 50;
+
+// Statuses where the order can still be cancelled — i.e. pickup hasn't
+// happened yet. Anything from "picked_up" onward is past that point.
+const CANCELLABLE_STATUSES = [
+  "pending_sp",
+  "sp_assigned",
+  "sp_accepted",
+  "rider_pickup_assigned",
+];
+
+exports.cancelOrder = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    // Ownership check — only the customer who placed the order can cancel it
+    if (String(order.customerId) !== String(req.user.id)) {
+      return res.status(403).json({ success: false, message: "You are not allowed to cancel this order" });
+    }
+
+    if (order.status === "cancelled") {
+      return res.status(400).json({ success: false, message: "This order is already cancelled" });
+    }
+
+    if (order.status === "delivered") {
+      return res.status(400).json({
+        success: false,
+        message: "This order has already been completed. If something was damaged, please raise a complaint instead.",
+      });
+    }
+
+    if (!CANCELLABLE_STATUSES.includes(order.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "This order can no longer be cancelled as pickup has already started. Please contact support if needed.",
+      });
+    }
+
+    const elapsedMs = Date.now() - new Date(order.createdAt).getTime();
+    const isWithinFreeWindow = elapsedMs <= FREE_CANCELLATION_WINDOW_MS;
+
+    const fee = isWithinFreeWindow ? 0 : Math.min(LATE_CANCELLATION_FEE, order.totalAmount);
+    const refundAmount = Math.max(order.totalAmount - fee, 0);
+
+    order.status = "cancelled";
+    order.cancelledAt = new Date();
+    order.cancelledBy = "customer";
+    order.cancellationFee = fee;
+    order.refundAmount = refundAmount;
+    order.statusHistory.push({
+      status: "cancelled",
+      note: fee > 0
+        ? `Cancelled by customer (late cancellation, ₹${fee} fee applied)`
+        : "Cancelled by customer (free cancellation)",
+    });
+
+    await order.save();
+
+    // 8.4: Refund issued as wallet credit
+    // NOTE: order.customerId stores the Account id (matching the rest of
+    // this codebase's convention), not the Customer document's own _id —
+    // so we resolve the actual Customer record via accountId first.
+    if (refundAmount > 0) {
+      const customer = await Customer.findOneAndUpdate(
+        { accountId: order.customerId },
+        { $inc: { walletBalance: refundAmount } },
+        { new: true }
+      );
+
+      if (customer) {
+        await WalletTransaction.create({
+          customerId: customer._id,
+          type: "credit",
+          amount: refundAmount,
+          reason: `Refund for cancelled order #${order.orderNumber}`,
+          orderId: order._id,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: fee > 0
+        ? `Order cancelled. A ₹${fee} late-cancellation fee was applied — ₹${refundAmount} has been credited to your wallet.`
+        : "Order cancelled for free. Any amount paid has been credited to your wallet.",
+      data: {
+        status: order.status,
+        cancellationFee: fee,
+        refundAmount,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // Update status
 
 exports.updateStatus =
@@ -313,154 +408,6 @@ exports.updateStatus =
 
   };
 
-// ── Cancel order (dedicated, policy-enforced endpoint — Terms §8.1–8.5) ─────
-// Replaces the old approach of hitting the generic PUT /:id/status route with
-// { status: "cancelled" }, which had no fee/refund/eligibility logic at all.
-exports.cancelOrder = async (req, res) => {
-  try {
-    const order = await Order.findOne({ orderNumber: req.params.id });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
-    }
-
-    // NOTE: Order.customerId stores the JWT's `id`, which is the Account
-    // document's _id (see authController's token payload and createOrder
-    // above) — NOT the Customer document's own _id. So ownership is checked
-    // directly against req.user.id here, not against a Customer lookup.
-    if (order.customerId.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not authorized to cancel this order",
-      });
-    }
-
-    if (order.status === "cancelled") {
-      return res.status(400).json({
-        success: false,
-        message: "This order has already been cancelled",
-      });
-    }
-
-    if (order.status === "delivered") {
-      return res.status(400).json({
-        success: false,
-        message: "Delivered orders cannot be cancelled",
-      });
-    }
-
-    // §8.1 only grants free cancellation "if pickup has not started" — once
-    // it has, this isn't a clean self-serve cancellation anymore.
-    if (PICKUP_STARTED_STATUSES.includes(order.status)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "This order is already picked up / in process. Please contact support to cancel it.",
-      });
-    }
-
-    const placedAt = new Date(order.createdAt).getTime();
-    const withinFreeWindow = Date.now() - placedAt <= FREE_CANCELLATION_WINDOW_MS;
-
-    // §8.1 / §8.2 — fee only applies once the free window has passed, and
-    // never exceeds what the customer actually paid.
-    const cancellationFee = withinFreeWindow
-      ? 0
-      : Math.min(LATE_CANCELLATION_FEE, order.totalAmount);
-
-    // Only money that was actually collected can be refunded.
-    const wasPaid = order.paymentStatus === "paid";
-    const refundAmount = wasPaid
-      ? Math.max(order.totalAmount - cancellationFee, 0)
-      : 0;
-
-    // §8.4 — Company discretion: refunds are issued as wallet credit.
-    const refundMode = refundAmount > 0 ? "wallet_credit" : "none";
-
-    order.status = "cancelled";
-    order.statusHistory.push({
-      status: "cancelled",
-      note: withinFreeWindow
-        ? "Cancelled by customer within the free-cancellation window"
-        : `Cancelled by customer after the free-cancellation window (₹${cancellationFee} fee applied)`,
-    });
-
-    order.cancellation = {
-      cancelledAt: new Date(),
-      cancelledBy: "customer",
-      isFreeCancellation: withinFreeWindow,
-      cancellationFee,
-      refundAmount,
-      refundMode,
-      // §8.3 allows up to 3–7 working days, but wallet credit is issued
-      // instantly rather than left "processing", since it's an internal
-      // ledger update rather than a bank/UPI reversal.
-      refundStatus: refundAmount > 0 ? "completed" : "not_applicable",
-    };
-
-    await order.save();
-
-    let walletBalance = null;
-
-    if (refundAmount > 0) {
-      // Resolve the real Customer document via accountId, since
-      // order.customerId is the Account _id, not Customer._id.
-      const customer = await Customer.findOne({ accountId: order.customerId });
-
-      if (customer) {
-        let wallet = await Wallet.findOne({ customerId: customer._id });
-        if (!wallet) {
-          wallet = await Wallet.create({
-            customerId: customer._id,
-            balance: 0,
-            transactions: [],
-          });
-        }
-
-        wallet.balance += refundAmount;
-        wallet.transactions.push({
-          type: "refund",
-          amount: refundAmount,
-          reason: withinFreeWindow
-            ? `Refund for cancelled order ${order.orderNumber}`
-            : `Refund for cancelled order ${order.orderNumber} (after ₹${cancellationFee} cancellation fee)`,
-          orderId: order._id,
-          orderNumber: order.orderNumber,
-        });
-
-        await wallet.save();
-        walletBalance = wallet.balance;
-      }
-    }
-
-    return res.json({
-      success: true,
-      message: withinFreeWindow
-        ? "Order cancelled free of charge"
-        : `Order cancelled. A ₹${cancellationFee} late cancellation fee was applied`,
-      data: {
-        orderNumber: order.orderNumber,
-        status: order.status,
-        isFreeCancellation: withinFreeWindow,
-        cancellationFee,
-        refundAmount,
-        refundMode,
-        refundStatus: order.cancellation.refundStatus,
-        walletBalance,
-      },
-    });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
 // Helper: convert internal status to user-friendly label
 const getStepLabel = (status) => {
   const map = {
@@ -494,13 +441,13 @@ const buildTrackingSteps = (order) => {
     const isEstimate = !completed && stepStatus === 'rider_delivery_assigned';
     let time = '';
     if (completed && entry?.updatedAt) {
-      time = new Date(entry.updatedAt).toLocaleString();
+      time = new Date(entry.updatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
     } else if (isEstimate && order.status !== 'delivered' && order.status !== 'cancelled') {
       // Estimate based on 'cleaned' time or createdAt + 2 hours
       const baseTime = history.find(h => h.status === 'cleaned')?.updatedAt || order.createdAt;
       if (baseTime) {
         const est = new Date(new Date(baseTime).getTime() + 2 * 60 * 60 * 1000);
-        time = `Est. ${est.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        time = `Est. ${est.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: "Asia/Kolkata" })}`;
       }
     }
     steps.push({
@@ -543,7 +490,7 @@ exports.getActiveOrder = async (req, res) => {
         id: order.orderNumber,
         service: order.items[0]?.serviceName || 'Laundry',
         items: order.items.reduce((sum, i) => sum + i.quantity, 0),
-        date: new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        date: new Date(order.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Kolkata' }),
         price: order.totalAmount,
         status: order.status,
         iconName: 'package-variant'
@@ -587,7 +534,7 @@ exports.getOrderHistory = async (req, res) => {
       id: order.orderNumber,
       service: order.items[0]?.serviceName || 'Laundry',
       items: order.items.reduce((sum, i) => sum + i.quantity, 0),
-      date: new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date: new Date(order.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Kolkata' }),
       price: order.totalAmount,
       status: order.status === 'delivered' ? 'Delivered' : 'Cancelled',
       iconName: 'package-variant'

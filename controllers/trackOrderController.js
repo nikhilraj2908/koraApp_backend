@@ -66,6 +66,7 @@ const buildTrackingSteps = (order) => {
         hour:   "2-digit",
         minute: "2-digit",
         hour12: true,
+        timeZone: "Asia/Kolkata",
       });
     } else if (
       s === "rider_delivery_assigned" &&
@@ -80,6 +81,7 @@ const buildTrackingSteps = (order) => {
         hour:   "2-digit",
         minute: "2-digit",
         hour12: true,
+        timeZone: "Asia/Kolkata",
       })}`;
     }
 
@@ -111,6 +113,7 @@ const formatOrderForApp = (order) => ({
     day:   "numeric",
     month: "short",
     year:  "numeric",
+    timeZone: "Asia/Kolkata",
   }),
   price:         order.totalAmount,
   status:        order.status,
@@ -233,7 +236,7 @@ exports.getOrderHistory = async (req, res) => {
         service:     o.items[0]?.serviceName || "Laundry",
         items:       o.items.reduce((sum, i) => sum + i.quantity, 0),
         date:        new Date(o.createdAt).toLocaleDateString("en-IN", {
-          day: "numeric", month: "short", year: "numeric",
+          day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata",
         }),
         price:       o.totalAmount,
         status:      o.status === "delivered" ? "Delivered" : "Cancelled",
