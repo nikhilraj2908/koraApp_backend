@@ -1,7 +1,10 @@
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
+// const WalletTransaction = require("../models/WalletTransaction");
 const WalletTransaction = require("../models/WalletCustomer");
+
 const { emitNewOrderToWashers } = require('../socket/trackingSocket');
 
 exports.createOrder = async (req, res) => {
@@ -261,7 +264,14 @@ const CANCELLABLE_STATUSES = [
 
 exports.cancelOrder = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const idParam = req.params.id;
+
+    // Accept either the real Mongo _id or the human-readable orderNumber
+    // (e.g. "KR1783280429904") — some screens only had the orderNumber
+    // available, which used to crash Order.findById with a CastError.
+    const order = mongoose.Types.ObjectId.isValid(idParam)
+      ? await Order.findById(idParam)
+      : await Order.findOne({ orderNumber: idParam });
 
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
@@ -488,6 +498,8 @@ exports.getActiveOrder = async (req, res) => {
     const formattedOrders = orders.map(order => {
       const orderSummary = {
         id: order.orderNumber,
+        _id: order._id,
+        orderNumber: order.orderNumber,
         service: order.items[0]?.serviceName || 'Laundry',
         items: order.items.reduce((sum, i) => sum + i.quantity, 0),
         date: new Date(order.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Kolkata' }),
@@ -532,6 +544,8 @@ exports.getOrderHistory = async (req, res) => {
 
     const formatted = historyOrders.map(order => ({
       id: order.orderNumber,
+      _id: order._id,
+      orderNumber: order.orderNumber,
       service: order.items[0]?.serviceName || 'Laundry',
       items: order.items.reduce((sum, i) => sum + i.quantity, 0),
       date: new Date(order.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Kolkata' }),
