@@ -2,7 +2,6 @@ const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
-// const WalletTransaction = require("../models/WalletTransaction");
 const WalletTransaction = require("../models/WalletCustomer");
 
 const { emitNewOrderToWashers } = require('../socket/trackingSocket');
@@ -324,21 +323,32 @@ exports.cancelOrder = async (req, res) => {
     // NOTE: order.customerId stores the Account id (matching the rest of
     // this codebase's convention), not the Customer document's own _id —
     // so we resolve the actual Customer record via accountId first.
+    //
+    // IMPORTANT: this is a side-effect of cancellation, not the main
+    // action. The order is already saved as cancelled above — if crediting
+    // the wallet fails for any reason, we log it but still tell the app
+    // the cancellation succeeded, instead of throwing and making the
+    // frontend think the whole cancellation failed.
     if (refundAmount > 0) {
-      const customer = await Customer.findOneAndUpdate(
-        { accountId: order.customerId },
-        { $inc: { walletBalance: refundAmount } },
-        { new: true }
-      );
+      try {
+        const customer = await Customer.findOneAndUpdate(
+          { accountId: order.customerId },
+          { $inc: { walletBalance: refundAmount } },
+          { new: true }
+        );
 
-      if (customer) {
-        await WalletTransaction.create({
-          customerId: customer._id,
-          type: "credit",
-          amount: refundAmount,
-          reason: `Refund for cancelled order #${order.orderNumber}`,
-          orderId: order._id,
-        });
+        if (customer) {
+          await WalletTransaction.create({
+            customerId: customer._id,
+            type: "credit",
+            amount: refundAmount,
+            reason: `Refund for cancelled order #${order.orderNumber}`,
+            orderId: order._id,
+          });
+        }
+      } catch (walletErr) {
+        console.error("Wallet credit failed after order cancellation:", walletErr.message);
+        // Intentionally not re-thrown — the order is already cancelled.
       }
     }
 
