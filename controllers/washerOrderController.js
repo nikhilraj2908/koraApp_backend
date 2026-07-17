@@ -1,8 +1,7 @@
 // controllers/washerOrderController.js
 const Order = require("../models/Order");
 const Washer = require("../models/Washer");
-const Customer = require("../models/Customer");
-const { sendPushNotification } = require("../utils/notification");
+const { sendPushNotification, notifyCustomer } = require("../utils/notification");
 
 // GET all pending orders (washer dashboard)
 exports.getPendingOrders = async (req, res) => {
@@ -43,14 +42,17 @@ exports.acceptOrder = async (req, res) => {
     await order.save();
 
     // Customer ko notify karo
-    const customer = await Customer.findById(order.customerId);
-    if (customer?.expoPushToken) {
-      await sendPushNotification(customer.expoPushToken, {
-        title: "Order Accepted! 🎉",
-        body: `Your order ${order.orderNumber} has been accepted by a service provider.`,
-        data: { orderNumber: order.orderNumber },
-      });
-    }
+    // NOTE: order.customerId is the Account _id (see createOrder /
+    // req.user.id), not Customer._id — the previous Customer.findById(...)
+    // here was silently finding nothing, so this notification never fired.
+    // notifyCustomer resolves this correctly internally.
+    notifyCustomer(order.customerId, {
+      title: "Order Accepted! 🎉",
+      body: `Your order ${order.orderNumber} has been accepted by a service provider.`,
+      type: "order_accepted",
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
 
     res.json({ success: true, message: "Order accepted", data: order });
   } catch (err) {
@@ -96,18 +98,20 @@ exports.updateOrderStatus = async (req, res) => {
     await order.save();
 
     // Customer ko notify
-    const customer = await Customer.findById(order.customerId);
+    // NOTE: same fix as acceptOrder above — order.customerId is the
+    // Account _id, not Customer._id.
     const messages = {
       at_sp: "Your clothes have arrived at the service provider.",
       cleaned: "Your clothes are cleaned and ready for pickup! 👕",
     };
-    if (customer?.expoPushToken) {
-      await sendPushNotification(customer.expoPushToken, {
-        title: "Order Update",
-        body: messages[status],
-        data: { orderNumber: order.orderNumber },
-      });
-    }
+    const typeByStatus = { at_sp: "order_at_sp", cleaned: "order_cleaned" };
+    notifyCustomer(order.customerId, {
+      title: "Order Update",
+      body: messages[status],
+      type: typeByStatus[status] || "general",
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
 
     res.json({ success: true, message: "Status updated", data: order });
   } catch (err) {

@@ -1,4 +1,5 @@
 const Order = require("../models/Order");
+const { notifyCustomer } = require("../utils/notification");
 
 
 const STATUS_LABEL = {
@@ -26,6 +27,43 @@ const STATUS_ICON = {
   rider_delivery_assigned:  "truck-delivery",
   delivered:                "check-circle-outline",
   cancelled:                "close-circle-outline",
+};
+
+// Real-time notification content per status — statuses not listed here
+// (pending_sp is set at creation, not via this endpoint; cancelled is
+// handled by orderController.cancelOrder's own policy-aware notification)
+// simply don't trigger a push from this generic status-update endpoint.
+const STATUS_NOTIFICATION = {
+  sp_accepted: {
+    type: "order_accepted",
+    title: "Order Accepted! 🎉",
+    body: (order) => `Your order ${order.orderNumber} has been accepted by a service provider.`,
+  },
+  picked_up: {
+    type: "order_picked_up",
+    title: "Order Picked Up",
+    body: (order) => `Your order ${order.orderNumber} has been picked up.`,
+  },
+  at_sp: {
+    type: "order_at_sp",
+    title: "Order Update",
+    body: () => "Your clothes have arrived at the service provider.",
+  },
+  cleaned: {
+    type: "order_cleaned",
+    title: "Order Update",
+    body: () => "Your clothes are cleaned and ready for pickup! 👕",
+  },
+  rider_delivery_assigned: {
+    type: "order_out_for_delivery",
+    title: "Out for Delivery 📦",
+    body: (order) => `Your order ${order.orderNumber} is out for delivery.`,
+  },
+  delivered: {
+    type: "order_delivered",
+    title: "Order Delivered ✅",
+    body: (order) => `Your order ${order.orderNumber} has been delivered. Enjoy!`,
+  },
 };
 
 /** Full ordered list of statuses (excluding cancelled — handled separately). */
@@ -284,6 +322,18 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     await order.save();
+
+    // Real-time notification (push + in-app history) for this status change
+    const notifConfig = STATUS_NOTIFICATION[status];
+    if (notifConfig) {
+      notifyCustomer(order.customerId, {
+        title: notifConfig.title,
+        body: notifConfig.body(order),
+        type: notifConfig.type,
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+      });
+    }
 
     res.json({
       success: true,

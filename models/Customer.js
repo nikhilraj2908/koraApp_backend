@@ -22,6 +22,7 @@ const CustomerSchema = new mongoose.Schema({
   defaultAddressId: mongoose.Schema.Types.ObjectId,
   phone: String,          // optional, separate from Account.mobile if needed
   expoPushToken: { type: String, default: null },
+  notificationsEnabled: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },
 });
 

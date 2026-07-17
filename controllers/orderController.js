@@ -1,10 +1,10 @@
-
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
 const Wallet = require("../models/WalletCustomer");
 const { emitNewOrderToWashers } = require('../socket/trackingSocket');
+const { notifyCustomer } = require("../utils/notification");
 
 // ── Cancellation & Refund Policy constants (see Terms §8.1–8.5) ──────────────
 const FREE_CANCELLATION_WINDOW_MS = 2 * 60 * 60 * 1000; // §8.1 — 2 hours
@@ -142,6 +142,16 @@ exports.createOrder = async (req, res) => {
 
 
     emitNewOrderToWashers(order);
+
+    // Real-time "order placed" notification (push + in-app history)
+    notifyCustomer(customerId, {
+      title: "Order Placed! 🎉",
+      body: `Your order ${order.orderNumber} has been placed successfully.`,
+      type: "order_placed",
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
+
     res.status(201).json({
 
       success: true,
@@ -407,6 +417,17 @@ exports.cancelOrder = async (req, res) => {
     };
 
     await order.save();
+
+    // Real-time "order cancelled" notification (push + in-app history)
+    notifyCustomer(order.customerId, {
+      title: "Order Cancelled",
+      body: cancellationFee > 0
+        ? `Your order #${order.orderNumber} was cancelled. A ₹${cancellationFee} cancellation fee was applied.`
+        : `Your order #${order.orderNumber} was cancelled free of charge.`,
+      type: "order_cancelled",
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
 
     let walletBalance = null;
     let walletCreditFailed = false;

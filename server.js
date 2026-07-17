@@ -23,6 +23,7 @@ const washerRoutes = require('./routes/washerRoutes');
 const complaintRoutes = require('./routes/complaintRoutes');
 const complaintCategoryRoutes = require('./routes/complaintCategoryRoutes');
 const walletRoutes = require('./routes/walletRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const mongoose = require('mongoose');
 const { apiLimiter } = require('./middleware/rateLimiter');
 
@@ -72,6 +73,7 @@ app.use('/api/washer', washerRoutes);
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/complaint-categories', complaintCategoryRoutes);
 app.use('/api/wallet', walletRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 const PORT = process.env.PORT || 5000;
 
