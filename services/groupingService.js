@@ -34,7 +34,7 @@ const { haversineDistanceMeters } = require("../helpers/geoHelper");
 const { computeGroupSizePlan } = require("./groupSizeService");
 const { getConfig } = require("../repositories/configRepository");
 const orderRepository = require("../repositories/orderRepository");
-const rideGroupRepository = require("../repositories/rideGroupRepository");
+const rideGroupRepository = require("../repositories/ridegroupRepository");
 const Order = require("../models/Order");
 
 function computeCentroid(orders) {
