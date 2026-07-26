@@ -24,6 +24,10 @@ const complaintRoutes = require('./routes/complaintRoutes');
 const complaintCategoryRoutes = require('./routes/complaintCategoryRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const configRoutes = require('./routes/configRoutes');
+const dispatchRoutes = require('./routes/dispatchRoutes');
+const rideOfferRoutes = require('./routes/rideOfferRoutes');
+const { getConfig } = require('./repositories/configRepository');
 const mongoose = require('mongoose');
 const { apiLimiter } = require('./middleware/rateLimiter');
 
@@ -41,6 +45,16 @@ app.use(apiLimiter);
 
 // Initialize Socket.IO
 initSocket(httpServer);
+
+// Wire the dispatch/auction system's socket broadcasting — must happen
+// after initSocket() so getIO() has an instance to attach to, and before
+// any RideOffer can be created (auctionService silently no-ops broadcasts
+// otherwise, which would mean offers get created but riders never see
+// them — see auctionService.js's attachSocketBroadcaster comment).
+const rideOfferSocket = require('./socket/rideOfferSocket');
+const { attachSocketBroadcaster } = require('./services/auctionService');
+attachSocketBroadcaster(rideOfferSocket);
+rideOfferSocket.registerRideOfferSocketHandlers();
 
 // Make io available in every request
 app.use((req, res, next) => {
@@ -74,6 +88,15 @@ app.use('/api/complaints', complaintRoutes);
 app.use('/api/complaint-categories', complaintCategoryRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/dispatch/config', configRoutes);
+app.use('/api/dispatch', dispatchRoutes);
+app.use('/api/ride-offers', rideOfferRoutes);
+
+// Ensure the dispatch Configuration document exists before any request
+// (grouping/pricing/scheduler) needs to read it.
+getConfig()
+  .then(() => console.log('[Dispatch] Configuration ready.'))
+  .catch((err) => console.error('[Dispatch] Failed to seed configuration:', err.message));
 
 const PORT = process.env.PORT || 5000;
 

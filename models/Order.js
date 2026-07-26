@@ -113,6 +113,65 @@ const OrderSchema = new mongoose.Schema({
   pickupAddress: AddressSchema,
   deliveryAddress: AddressSchema,
 
+  // Dedicated GeoJSON field for spatial queries ($near / $geoNear during
+  // clustering) — pickupAddress.coordinates above is a plain array with
+  // no index and isn't queryable this way. Populated from the same
+  // coordinates at order-creation time; kept in sync, never edited
+  // independently.
+  pickupLocation: {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], default: undefined }, // [lng, lat]
+  },
+
+  // ── Pickup slot / dispatch pipeline (see constants/dispatchConstants.js) ──
+  clothQuantity: {
+    // Total piece count across all items — denormalized here so the
+    // grouping job can read it without populating/summing `items` on
+    // every pending order every time a slot starts.
+    type: Number,
+    default: 0,
+  },
+
+  bookingTime: {
+    // Explicit field per spec, even though it's very close to
+    // `createdAt` — keeps the slot-assignment logic's intent obvious
+    // (this is specifically "when the customer booked", used to decide
+    // which slot the order falls into) independent of Mongoose internals.
+    type: Date,
+    default: Date.now,
+  },
+
+  pickupDate: {
+    // Calendar date (midnight, dispatch timezone) this order's pickup
+    // slot falls on — lets the scheduler query "all of today's morning
+    // orders" with a simple equality match.
+    type: Date,
+  },
+
+  pickupSlot: {
+    type: String,
+    enum: ["MORNING", "EVENING"],
+  },
+
+  dispatchStatus: {
+    // Parallel to `status` above — `status` drives the existing
+    // customer-facing tracking UI/notifications and must not be touched
+    // by the grouping/auction pipeline directly. This tracks this
+    // order's position in THAT pipeline specifically. Once a rider
+    // accepts the group containing this order, dispatchStatus becomes
+    // "assigned" and status transitions to "rider_pickup_assigned" (the
+    // existing tracking value), converging the two.
+    type: String,
+    enum: ["awaiting_slot", "grouping", "grouped", "offer_pending", "assigned", "cancelled"],
+    default: "awaiting_slot",
+  },
+
+  rideGroupId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "RideGroup",
+    default: null,
+  },
+
   serviceProviderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "ServiceProvider"
@@ -179,6 +238,12 @@ OrderSchema.index({
   customerId: 1,
   status: 1
 });
+
+// Geospatial index — required for $near/$geoNear queries during clustering.
+OrderSchema.index({ pickupLocation: "2dsphere" });
+
+// Scheduler's core query: "all pending orders for today's morning slot".
+OrderSchema.index({ pickupSlot: 1, pickupDate: 1, dispatchStatus: 1 });
 
 module.exports = mongoose.model(
   "Order",

@@ -13,6 +13,34 @@ const initSocket = (httpServer) => {
     cors: { origin: '*' }
   });
 
+  // Optional-but-verified auth: if a token is provided during the
+  // handshake, it MUST be valid (bad token -> connection rejected). No
+  // token at all is still allowed, to avoid breaking the existing
+  // customer-tracking `join_order` flow, which doesn't currently send
+  // one — but this is what lets NEW code (accept_ride_offer below)
+  // require socket.riderId to be genuinely verified rather than trusting
+  // whatever riderId a client claims in an event payload.
+  //
+  // NOTE: `join_rider_room` / `join_washer_room` further down still
+  // trust a client-supplied id with no verification at all — that's
+  // pre-existing behavior this change doesn't touch. Worth hardening
+  // those the same way this authenticates accept_ride_offer, but that's
+  // a separate, deliberate follow-up rather than bundled silently here.
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(); // unauthenticated connection allowed through
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      socket.userId = decoded.id ?? null;
+      socket.riderId = decoded.riderId ?? null;
+      socket.role = decoded.role ?? null;
+      next();
+    } catch (err) {
+      next(new Error("Invalid or expired token"));
+    }
+  });
+
   io.on('connection', (socket) => {
     console.log('Socket connected:', socket.id);
 

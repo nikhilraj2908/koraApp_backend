@@ -28,8 +28,29 @@ const RiderSchema = new mongoose.Schema({
   },
   isVerified: { type: Boolean, default: false },
   totalEarnings: { type: Number, default: 0 },
+
+  // ── Dispatch system fields ──
+  expoPushToken: { type: String, default: null },
+
+  // Live GPS — updated continuously while the rider app is open/tracking
+  // (see services/riderLocationService.js, Phase 2). Distinct from
+  // `preparedLocation` above, which is a one-time onboarding address, not
+  // a live-tracked position.
+  currentLocation: {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], default: undefined }, // [lng, lat]
+  },
+  locationUpdatedAt: { type: Date, default: null },
+
+  // Rider has the app open and toggled "online" — a prerequisite for
+  // receiving ride offers, separate from isAvailable (online but
+  // mid-delivery = not available for a NEW offer).
+  isOnline: { type: Boolean, default: false },
+  isAvailable: { type: Boolean, default: true },
+
   createdAt: { type: Date, default: Date.now }
 });
 
-// No 2dsphere index – removed
+// Required for $near/$geoNear nearby-rider discovery queries.
+RiderSchema.index({ currentLocation: "2dsphere" });
 module.exports = mongoose.model('Rider', RiderSchema);

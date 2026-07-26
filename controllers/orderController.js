@@ -4,7 +4,7 @@ const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
 const Wallet = require("../models/WalletCustomer");
 const { emitNewOrderToWashers } = require('../socket/trackingSocket');
-const { notifyCustomer } = require("../utils/notification");
+const { resolvePickupSlot } = require("../helpers/slotHelper");
 
 // ── Cancellation & Refund Policy constants (see Terms §8.1–8.5) ──────────────
 const FREE_CANCELLATION_WINDOW_MS = 2 * 60 * 60 * 1000; // §8.1 — 2 hours
@@ -110,6 +110,25 @@ exports.createOrder = async (req, res) => {
     const orderNumber =
       `KR${Date.now()}`;
 
+    // ── Dispatch system: slot assignment + geo point (see helpers/slotHelper.js) ──
+    const bookingTime = new Date();
+    const { pickupSlot, pickupDate } = await resolvePickupSlot(bookingTime);
+    const clothQuantity = finalItems.reduce((sum, item) => sum + item.quantity, 0);
+
+    // pickupAddress.coordinates is already [longitude, latitude] — same
+    // convention utils/routeCalculator.js already uses elsewhere in this
+    // codebase — so no reordering needed to build the GeoJSON point.
+    const pickupLocation =
+      Array.isArray(pickupAddress?.coordinates) && pickupAddress.coordinates.length === 2
+        ? { type: "Point", coordinates: pickupAddress.coordinates }
+        : undefined;
+
+    if (!pickupLocation) {
+      console.error(
+        `[Dispatch] Order ${orderNumber} created without valid pickupAddress.coordinates — it will NOT be eligible for automatic pickup grouping until this is fixed.`
+      );
+    }
+
     let pickupScheduledAt = null;
     if (pickupDay && timeSlot) {
       const match = timeSlot.match(/(\d+):(\d+) (AM|PM)/);
@@ -136,22 +155,19 @@ exports.createOrder = async (req, res) => {
       deliveryAddress,
       paymentMethod,
       pickupScheduledAt,   // ← yeh add karo
+      // ── Dispatch system fields ──
+      pickupLocation,
+      clothQuantity,
+      bookingTime,
+      pickupDate,
+      pickupSlot,
+      dispatchStatus: "awaiting_slot",
       status: "pending_sp",
       statusHistory: [{ status: "pending_sp" }]
     });
 
 
     emitNewOrderToWashers(order);
-
-    // Real-time "order placed" notification (push + in-app history)
-    notifyCustomer(customerId, {
-      title: "Order Placed! 🎉",
-      body: `Your order ${order.orderNumber} has been placed successfully.`,
-      type: "order_placed",
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-    });
-
     res.status(201).json({
 
       success: true,
@@ -417,17 +433,6 @@ exports.cancelOrder = async (req, res) => {
     };
 
     await order.save();
-
-    // Real-time "order cancelled" notification (push + in-app history)
-    notifyCustomer(order.customerId, {
-      title: "Order Cancelled",
-      body: cancellationFee > 0
-        ? `Your order #${order.orderNumber} was cancelled. A ₹${cancellationFee} cancellation fee was applied.`
-        : `Your order #${order.orderNumber} was cancelled free of charge.`,
-      type: "order_cancelled",
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-    });
 
     let walletBalance = null;
     let walletCreditFailed = false;

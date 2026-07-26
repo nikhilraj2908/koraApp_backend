@@ -202,4 +202,65 @@ router.post('/auth/login', async (req, res) => {
 router.get('/profile', riderProtect, restrictTo('rider'), getProfile);
 router.put('/profile', riderProtect, restrictTo('rider'), updateProfile);
 
+// ── Live location (dispatch system) ─────────────────────────────
+// Rider app should call this on a steady interval (e.g. every 10-15s)
+// while the app is open — this is what populates the 2dsphere-indexed
+// field repositories/riderRepository.js's findNearbyAvailableRiders
+// actually queries against for ride-offer discovery.
+router.patch('/location', riderProtect, restrictTo('rider'), async (req, res) => {
+  try {
+    const { longitude, latitude } = req.body;
+
+    if (typeof longitude !== 'number' || typeof latitude !== 'number') {
+      return res.status(400).json({ success: false, message: 'longitude and latitude (numbers) are required' });
+    }
+
+    await Rider.updateOne(
+      { _id: req.rider._id },
+      {
+        $set: {
+          currentLocation: { type: 'Point', coordinates: [longitude, latitude] },
+          locationUpdatedAt: new Date(),
+        },
+      }
+    );
+
+    res.json({ success: true, message: 'Location updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── Online / availability toggle ────────────────────────────────
+// isOnline: rider has the app open and wants to receive offers at all.
+// isAvailable: online but not mid-delivery — set to false automatically
+// by services/auctionService.js's acceptOffer, and should be set back
+// to true by the rider app once a delivery completes.
+router.patch('/availability', riderProtect, restrictTo('rider'), async (req, res) => {
+  try {
+    const { isOnline, isAvailable } = req.body;
+    const update = {};
+
+    if (typeof isOnline === 'boolean') update.isOnline = isOnline;
+    if (typeof isAvailable === 'boolean') update.isAvailable = isAvailable;
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ success: false, message: 'isOnline and/or isAvailable (booleans) required' });
+    }
+
+    const rider = await Rider.findOneAndUpdate(
+      { _id: req.rider._id },
+      { $set: update },
+      { new: true }
+    );
+
+    res.json({
+      success: true,
+      data: { isOnline: rider.isOnline, isAvailable: rider.isAvailable },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;
