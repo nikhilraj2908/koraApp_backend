@@ -21,6 +21,9 @@ const PICKUP_STARTED_STATUSES = [
   "delivered",
 ];
 
+const { handleOrderCancellation } = require("../services/dispatchCancellationService");
+const { ALLOW_MID_PIPELINE_CANCELLATION } = require("../constants/dispatchConstants");
+
 exports.createOrder = async (req, res) => {
 
   try {
@@ -393,6 +396,31 @@ exports.cancelOrder = async (req, res) => {
       });
     }
 
+    // Dispatch-pipeline guard (see constants/dispatchConstants.js): once an
+    // order has been claimed into a RideGroup, it may be sitting inside a
+    // route a rider is actively being auctioned on (or has already
+    // accepted) — pulling it out here would need to re-optimize that
+    // group's route, possibly renegotiate the rider's agreed price, and
+    // notify an already-committed rider that their pickup count just
+    // dropped. That's a real product/business decision, not something
+    // safe to improvise inline in a cancel handler, so self-serve
+    // cancellation is blocked from GROUPING onward and routed to support
+    // instead. Only "awaiting_slot" (order hasn't been touched by the
+    // dispatch pipeline yet) is still safely self-serve cancellable.
+    if (
+      !ALLOW_MID_PIPELINE_CANCELLATION &&
+      order.dispatchStatus &&
+      order.dispatchStatus !== "awaiting_slot"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          order.dispatchStatus === "assigned"
+            ? "A rider has already been assigned to pick up this order. Please contact support to cancel it."
+            : "This order is currently being matched with a rider. Please contact support to cancel it.",
+      });
+    }
+
     const placedAt = new Date(order.createdAt).getTime();
     const withinFreeWindow = Date.now() - placedAt <= FREE_CANCELLATION_WINDOW_MS;
 
@@ -433,6 +461,17 @@ exports.cancelOrder = async (req, res) => {
     };
 
     await order.save();
+
+    // Clean up any RideGroup/RideOffer/Assignment this order was part of
+    // — without this, a cancelled order could still show up on a rider's
+    // pickup list, or leave a stale offer broadcasting a route/price that
+    // no longer matches reality. Runs best-effort: a failure here must
+    // never block the cancellation/refund itself from completing.
+    try {
+      await handleOrderCancellation(order);
+    } catch (err) {
+      console.error(`[CancelOrder] Dispatch cleanup failed for order ${order.orderNumber} (order is still cancelled):`, err.message);
+    }
 
     let walletBalance = null;
     let walletCreditFailed = false;
