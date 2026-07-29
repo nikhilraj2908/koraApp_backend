@@ -1,18 +1,37 @@
-const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
 const Wallet = require("../models/WalletCustomer");
-const { emitNewOrderToWashers } = require('../socket/trackingSocket');
-const { resolvePickupSlot } = require("../helpers/slotHelper");
 
-// ── Cancellation & Refund Policy constants (see Terms §8.1–8.5) ──────────────
-const FREE_CANCELLATION_WINDOW_MS = 2 * 60 * 60 * 1000; // §8.1 — 2 hours
-const LATE_CANCELLATION_FEE = 50; // §8.2 — ₹50
+const {
+  emitNewOrderToWashers,
+} = require("../socket/trackingSocket");
 
-// Once an order reaches any of these statuses, pickup has already started,
-// so this is no longer a simple, policy-driven self-cancel (§8.1 only applies
-// "if pickup has not started"); route the customer to support instead.
+const {
+  notifyCustomer,
+} = require("../utils/notification");
+
+const {
+  resolvePickupSlot,
+} = require("../helpers/slotHelper");
+
+const {
+  handleOrderCancellation,
+} = require("../services/dispatchCancellationService");
+
+const {
+  ALLOW_MID_PIPELINE_CANCELLATION,
+} = require("../constants/dispatchConstants");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cancellation and refund policy
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FREE_CANCELLATION_WINDOW_MS =
+  2 * 60 * 60 * 1000;
+
+const LATE_CANCELLATION_FEE = 50;
+
 const PICKUP_STARTED_STATUSES = [
   "picked_up",
   "at_sp",
@@ -21,13 +40,12 @@ const PICKUP_STARTED_STATUSES = [
   "delivered",
 ];
 
-const { handleOrderCancellation } = require("../services/dispatchCancellationService");
-const { ALLOW_MID_PIPELINE_CANCELLATION } = require("../constants/dispatchConstants");
+// ─────────────────────────────────────────────────────────────────────────────
+// Create order
+// ─────────────────────────────────────────────────────────────────────────────
 
 exports.createOrder = async (req, res) => {
-
   try {
-
     const customerId = req.user.id;
 
     const {
@@ -35,118 +53,203 @@ exports.createOrder = async (req, res) => {
       pickupAddress,
       deliveryAddress,
       paymentMethod,
-      pickupDay,   // ← add
-      timeSlot
+      paymentStatus,
+      pickupDay,
+      timeSlot,
     } = req.body;
 
-
-    if (!items || items.length === 0) {
-
+    if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Cart empty"
-      })
-
+        message: "Cart empty",
+      });
     }
 
-    let finalItems = [];
+    const finalItems = [];
     let subtotal = 0;
 
-
     for (const item of items) {
-
       const service = await Service.findById(
         item.serviceId
       );
 
       if (!service) {
-
         return res.status(400).json({
           success: false,
-          message: `Invalid service`
-        })
-
+          message: "Invalid service",
+        });
       }
 
-      const unitPrice =
-        service.pricePerKg;
+      const quantity = Number(item.quantity);
+
+      if (!quantity || quantity <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid item quantity",
+        });
+      }
+
+      const unitPrice = Number(
+        service.pricePerKg
+      );
 
       const totalPrice =
-        unitPrice * item.quantity;
+        unitPrice * quantity;
 
       subtotal += totalPrice;
 
       finalItems.push({
-
         serviceId: service._id,
         serviceName: service.name,
-
-        categoryName:
-          item.categoryName,
-
+        categoryName: item.categoryName,
         subCategoryName:
           item.subCategoryName,
-
-        quantity: item.quantity,
-
+        quantity,
         unitPrice,
-        totalPrice
-
-      })
-
+        totalPrice,
+      });
     }
 
-
-    // Prices shown to the customer while building the cart (₹30/piece etc.)
-    // are GST-inclusive — the customer should never end up paying more than
-    // what they saw on the service selection / cart screens. "tax" here is
-    // just the GST portion already baked into subtotal, kept so the order
-    // details / invoice can show a proper breakdown — it is NOT added on
-    // top of subtotal.
+    // Prices are GST-inclusive.
     const discount = 0;
+    const totalAmount =
+      subtotal - discount;
 
-    const totalAmount = subtotal - discount;
-
-    const tax = +(subtotal - subtotal / 1.05).toFixed(2);
-
+    const tax = +(
+      subtotal -
+      subtotal / 1.05
+    ).toFixed(2);
 
     const orderNumber =
       `KR${Date.now()}`;
 
-    // ── Dispatch system: slot assignment + geo point (see helpers/slotHelper.js) ──
-    const bookingTime = new Date();
-    const { pickupSlot, pickupDate } = await resolvePickupSlot(bookingTime);
-    const clothQuantity = finalItems.reduce((sum, item) => sum + item.quantity, 0);
+    // ─────────────────────────────────────────────────────────────────────────
+    // Dispatch system fields
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // pickupAddress.coordinates is already [longitude, latitude] — same
-    // convention utils/routeCalculator.js already uses elsewhere in this
-    // codebase — so no reordering needed to build the GeoJSON point.
+    const bookingTime = new Date();
+
+    const {
+      pickupSlot,
+      pickupDate,
+    } = await resolvePickupSlot(
+      bookingTime
+    );
+
+    const clothQuantity =
+      finalItems.reduce(
+        (sum, item) =>
+          sum + item.quantity,
+        0
+      );
+
+    const coordinates =
+      pickupAddress?.coordinates;
+
+    const hasValidCoordinates =
+      Array.isArray(coordinates) &&
+      coordinates.length === 2 &&
+      coordinates.every(
+        (coordinate) =>
+          typeof coordinate ===
+            "number" &&
+          Number.isFinite(coordinate)
+      );
+
     const pickupLocation =
-      Array.isArray(pickupAddress?.coordinates) && pickupAddress.coordinates.length === 2
-        ? { type: "Point", coordinates: pickupAddress.coordinates }
+      hasValidCoordinates
+        ? {
+            type: "Point",
+            coordinates,
+          }
         : undefined;
 
     if (!pickupLocation) {
       console.error(
-        `[Dispatch] Order ${orderNumber} created without valid pickupAddress.coordinates — it will NOT be eligible for automatic pickup grouping until this is fixed.`
+        `[Dispatch] Order ${orderNumber} created without valid pickup coordinates. It will not be eligible for automatic pickup grouping.`
       );
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Customer-selected pickup time
+    // ─────────────────────────────────────────────────────────────────────────
+
     let pickupScheduledAt = null;
+
     if (pickupDay && timeSlot) {
-      const match = timeSlot.match(/(\d+):(\d+) (AM|PM)/);
+      const match = String(
+        timeSlot
+      ).match(
+        /(\d+):(\d+)\s*(AM|PM)/i
+      );
+
       if (match) {
-        let hour = parseInt(match[1]);
-        const period = match[3];
-        if (period === "PM" && hour !== 12) hour += 12;
-        if (period === "AM" && hour === 12) hour = 0;
-        pickupScheduledAt = new Date(
-          `${pickupDay}T${String(hour).padStart(2, "0")}:00:00`
+        let hour = parseInt(
+          match[1],
+          10
         );
+
+        const minute = parseInt(
+          match[2],
+          10
+        );
+
+        const period =
+          match[3].toUpperCase();
+
+        if (
+          period === "PM" &&
+          hour !== 12
+        ) {
+          hour += 12;
+        }
+
+        if (
+          period === "AM" &&
+          hour === 12
+        ) {
+          hour = 0;
+        }
+
+        const formattedHour =
+          String(hour).padStart(
+            2,
+            "0"
+          );
+
+        const formattedMinute =
+          String(minute).padStart(
+            2,
+            "0"
+          );
+
+        pickupScheduledAt =
+          new Date(
+            `${pickupDay}T${formattedHour}:${formattedMinute}:00`
+          );
+
+        if (
+          Number.isNaN(
+            pickupScheduledAt.getTime()
+          )
+        ) {
+          pickupScheduledAt = null;
+        }
       }
     }
 
-    const order = await Order.create({
+    // Frontend should send "paid".
+    // "success" is accepted temporarily for backward compatibility.
+    const normalizedPaymentStatus =
+      paymentStatus === "paid" ||
+      paymentStatus === "success"
+        ? "paid"
+        : paymentStatus ===
+          "failed"
+        ? "failed"
+        : "pending";
+
+    const orderData = {
       customerId,
       orderNumber,
       items: finalItems,
@@ -157,145 +260,219 @@ exports.createOrder = async (req, res) => {
       pickupAddress,
       deliveryAddress,
       paymentMethod,
-      pickupScheduledAt,   // ← yeh add karo
-      // ── Dispatch system fields ──
-      pickupLocation,
+      paymentStatus:
+        normalizedPaymentStatus,
+      pickupScheduledAt,
+
+      // Dispatch fields
       clothQuantity,
       bookingTime,
       pickupDate,
       pickupSlot,
-      dispatchStatus: "awaiting_slot",
+      dispatchStatus:
+        "awaiting_slot",
+
       status: "pending_sp",
-      statusHistory: [{ status: "pending_sp" }]
-    });
 
+      statusHistory: [
+        {
+          status: "pending_sp",
+          note: "Order placed successfully",
+        },
+      ],
+    };
 
-    emitNewOrderToWashers(order);
-    res.status(201).json({
+    // Avoid storing incomplete GeoJSON.
+    if (pickupLocation) {
+      orderData.pickupLocation =
+        pickupLocation;
+    }
 
-      success: true,
-      message: "Order created",
-      data: order
+    const order =
+      await Order.create(
+        orderData
+      );
 
-    })
+    console.log(
+      `[CreateOrder] Order created: ${order.orderNumber}`
+    );
 
+    // Notify washers/service providers.
+    try {
+      emitNewOrderToWashers(order);
+    } catch (socketError) {
+      console.error(
+        `[CreateOrder] Washer socket notification failed for ${order.orderNumber}:`,
+        socketError
+      );
+    }
 
+    // Create in-app history and send push notification to customer.
+    try {
+      await notifyCustomer(
+        customerId,
+        {
+          title:
+            "Order Placed! 🎉",
+
+          body:
+            `Your order ${order.orderNumber} has been placed successfully.`,
+
+          type: "order_placed",
+
+          orderId:
+            order._id,
+
+          orderNumber:
+            order.orderNumber,
+        }
+      );
+
+      console.log(
+        `[CreateOrder] Customer notification sent for ${order.orderNumber}`
+      );
+    } catch (
+      notificationError
+    ) {
+      // Notification failure should never fail an otherwise successful order.
+      console.error(
+        `[CreateOrder] Customer notification failed for ${order.orderNumber}:`,
+        notificationError
+      );
+    }
+
+    return res
+      .status(201)
+      .json({
+        success: true,
+        message:
+          "Order created",
+        data: order,
+      });
+  } catch (error) {
+    console.error(
+      "[CreateOrder] Error:",
+      error
+    );
+
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message:
+          error.message,
+      });
   }
-  catch (error) {
+};
 
-    console.log(error);
-
-    res.status(500).json({
-
-      success: false,
-      message: error.message
-
-    })
-
-  }
-
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
 // Recent orders
+// ─────────────────────────────────────────────────────────────────────────────
 
 exports.getRecentOrders =
   async (req, res) => {
-
     try {
-
       const customerId =
         req.user.id;
 
       const orders =
         await Order.find({
-
-          customerId
-
+          customerId,
         })
-
           .sort({
-            createdAt: -1
+            createdAt: -1,
           })
-
           .limit(10);
 
-      res.json({
-
+      return res.json({
         success: true,
-        data: orders
-
+        data: orders,
       });
-
+    } catch (error) {
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            error.message,
+        });
     }
-    catch (error) {
-
-      res.status(500).json({
-
-        success: false,
-        message: error.message
-
-      });
-
-    }
-
   };
 
-
-
-
+// ─────────────────────────────────────────────────────────────────────────────
 // Order details
+// ─────────────────────────────────────────────────────────────────────────────
 
 exports.getOrderDetails =
   async (req, res) => {
-
     try {
-
-      const order = await Order.findOne({ orderNumber: req.params.id }); // ← yeh badla
-
-      if (!order) {
-
-        return res.status(404)
-          .json({
-
-            success: false,
-            message:
-              "Order not found"
-
-          });
-
-      }
-      res.json({
-
-        success: true,
-        data: order
-
-      });
-
-    }
-    catch (error) {
-
-      res.status(500)
-        .json({
-
-          success: false,
-          message: error.message
-
+      const order =
+        await Order.findOne({
+          orderNumber:
+            req.params.id,
         });
 
-    }
+      if (!order) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message:
+              "Order not found",
+          });
+      }
 
+      // Optional ownership protection:
+      // customer users should not be able to access another customer's order.
+      if (
+        order.customerId &&
+        order.customerId.toString() !==
+          req.user.id &&
+        req.user.role !== "admin"
+      ) {
+        return res
+          .status(403)
+          .json({
+            success: false,
+            message:
+              "You are not authorized to view this order",
+          });
+      }
+
+      return res.json({
+        success: true,
+        data: order,
+      });
+    } catch (error) {
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            error.message,
+        });
+    }
   };
 
-
+// ─────────────────────────────────────────────────────────────────────────────
 // Update status
+// ─────────────────────────────────────────────────────────────────────────────
 
 exports.updateStatus =
   async (req, res) => {
-
     try {
-
       const { status } =
         req.body;
+
+      if (!status) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Status is required",
+          });
+      }
 
       const order =
         await Order.findById(
@@ -303,386 +480,835 @@ exports.updateStatus =
         );
 
       if (!order) {
-
-        return res.status(404)
+        return res
+          .status(404)
           .json({
-
             success: false,
-            message: "Order not found"
-
+            message:
+              "Order not found",
           });
-
       }
 
       order.status = status;
 
       order.statusHistory.push({
-
-        status
-
+        status,
       });
 
       await order.save();
 
-      res.json({
-
+      return res.json({
         success: true,
         message:
-          "Status updated"
-
+          "Status updated",
+        data: order,
       });
-
-    }
-    catch (error) {
-
-      res.status(500)
+    } catch (error) {
+      return res
+        .status(500)
         .json({
-
           success: false,
-          message: error.message
+          message:
+            error.message,
+        });
+    }
+  };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cancel order
+// ─────────────────────────────────────────────────────────────────────────────
+
+exports.cancelOrder =
+  async (req, res) => {
+    try {
+      const order =
+        await Order.findOne({
+          orderNumber:
+            req.params.id,
         });
 
-    }
+      if (!order) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message:
+              "Order not found",
+          });
+      }
 
-  };
+      if (
+        order.customerId.toString() !==
+        req.user.id
+      ) {
+        return res
+          .status(403)
+          .json({
+            success: false,
+            message:
+              "You are not authorized to cancel this order",
+          });
+      }
 
-// ── Cancel order (dedicated, policy-enforced endpoint — Terms §8.1–8.5) ─────
-// Replaces the old approach of hitting the generic PUT /:id/status route with
-// { status: "cancelled" }, which had no fee/refund/eligibility logic at all.
-exports.cancelOrder = async (req, res) => {
-  try {
-    const order = await Order.findOne({ orderNumber: req.params.id });
+      if (
+        order.status ===
+        "cancelled"
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "This order has already been cancelled",
+          });
+      }
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
+      if (
+        order.status ===
+        "delivered"
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Delivered orders cannot be cancelled",
+          });
+      }
+
+      if (
+        PICKUP_STARTED_STATUSES.includes(
+          order.status
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "This order is already picked up or in process. Please contact support to cancel it.",
+          });
+      }
+
+      // Stop self-cancellation once dispatch grouping has started.
+      if (
+        !ALLOW_MID_PIPELINE_CANCELLATION &&
+        order.dispatchStatus &&
+        order.dispatchStatus !==
+          "awaiting_slot"
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              order.dispatchStatus ===
+              "assigned"
+                ? "A rider has already been assigned to pick up this order. Please contact support to cancel it."
+                : "This order is currently being matched with a rider. Please contact support to cancel it.",
+          });
+      }
+
+      const placedAt =
+        new Date(
+          order.createdAt
+        ).getTime();
+
+      const withinFreeWindow =
+        Date.now() -
+          placedAt <=
+        FREE_CANCELLATION_WINDOW_MS;
+
+      const cancellationFee =
+        withinFreeWindow
+          ? 0
+          : Math.min(
+              LATE_CANCELLATION_FEE,
+              order.totalAmount
+            );
+
+      const wasPaid =
+        order.paymentStatus ===
+        "paid";
+
+      const refundAmount =
+        wasPaid
+          ? Math.max(
+              order.totalAmount -
+                cancellationFee,
+              0
+            )
+          : 0;
+
+      const refundMode =
+        refundAmount > 0
+          ? "wallet_credit"
+          : "none";
+
+      order.status =
+        "cancelled";
+
+      order.statusHistory.push({
+        status: "cancelled",
+
+        note:
+          withinFreeWindow
+            ? "Cancelled by customer within the free-cancellation window"
+            : `Cancelled by customer after the free-cancellation window (₹${cancellationFee} fee applied)`,
       });
-    }
 
-    // NOTE: Order.customerId stores the JWT's `id`, which is the Account
-    // document's _id (see authController's token payload and createOrder
-    // above) — NOT the Customer document's own _id. So ownership is checked
-    // directly against req.user.id here, not against a Customer lookup.
-    if (order.customerId.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not authorized to cancel this order",
-      });
-    }
+      order.cancellation = {
+        cancelledAt:
+          new Date(),
 
-    if (order.status === "cancelled") {
-      return res.status(400).json({
-        success: false,
-        message: "This order has already been cancelled",
-      });
-    }
+        cancelledBy:
+          "customer",
 
-    if (order.status === "delivered") {
-      return res.status(400).json({
-        success: false,
-        message: "Delivered orders cannot be cancelled",
-      });
-    }
+        isFreeCancellation:
+          withinFreeWindow,
 
-    // §8.1 only grants free cancellation "if pickup has not started" — once
-    // it has, this isn't a clean self-serve cancellation anymore.
-    if (PICKUP_STARTED_STATUSES.includes(order.status)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "This order is already picked up / in process. Please contact support to cancel it.",
-      });
-    }
+        cancellationFee,
 
-    // Dispatch-pipeline guard (see constants/dispatchConstants.js): once an
-    // order has been claimed into a RideGroup, it may be sitting inside a
-    // route a rider is actively being auctioned on (or has already
-    // accepted) — pulling it out here would need to re-optimize that
-    // group's route, possibly renegotiate the rider's agreed price, and
-    // notify an already-committed rider that their pickup count just
-    // dropped. That's a real product/business decision, not something
-    // safe to improvise inline in a cancel handler, so self-serve
-    // cancellation is blocked from GROUPING onward and routed to support
-    // instead. Only "awaiting_slot" (order hasn't been touched by the
-    // dispatch pipeline yet) is still safely self-serve cancellable.
-    if (
-      !ALLOW_MID_PIPELINE_CANCELLATION &&
-      order.dispatchStatus &&
-      order.dispatchStatus !== "awaiting_slot"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          order.dispatchStatus === "assigned"
-            ? "A rider has already been assigned to pick up this order. Please contact support to cancel it."
-            : "This order is currently being matched with a rider. Please contact support to cancel it.",
-      });
-    }
+        refundAmount,
 
-    const placedAt = new Date(order.createdAt).getTime();
-    const withinFreeWindow = Date.now() - placedAt <= FREE_CANCELLATION_WINDOW_MS;
+        refundMode,
 
-    // §8.1 / §8.2 — fee only applies once the free window has passed, and
-    // never exceeds what the customer actually paid.
-    const cancellationFee = withinFreeWindow
-      ? 0
-      : Math.min(LATE_CANCELLATION_FEE, order.totalAmount);
+        refundStatus:
+          refundAmount > 0
+            ? "completed"
+            : "not_applicable",
+      };
 
-    // Only money that was actually collected can be refunded.
-    const wasPaid = order.paymentStatus === "paid";
-    const refundAmount = wasPaid
-      ? Math.max(order.totalAmount - cancellationFee, 0)
-      : 0;
+      await order.save();
 
-    // §8.4 — Company discretion: refunds are issued as wallet credit.
-    const refundMode = refundAmount > 0 ? "wallet_credit" : "none";
-
-    order.status = "cancelled";
-    order.statusHistory.push({
-      status: "cancelled",
-      note: withinFreeWindow
-        ? "Cancelled by customer within the free-cancellation window"
-        : `Cancelled by customer after the free-cancellation window (₹${cancellationFee} fee applied)`,
-    });
-
-    order.cancellation = {
-      cancelledAt: new Date(),
-      cancelledBy: "customer",
-      isFreeCancellation: withinFreeWindow,
-      cancellationFee,
-      refundAmount,
-      refundMode,
-      // §8.3 allows up to 3–7 working days, but wallet credit is issued
-      // instantly rather than left "processing", since it's an internal
-      // ledger update rather than a bank/UPI reversal.
-      refundStatus: refundAmount > 0 ? "completed" : "not_applicable",
-    };
-
-    await order.save();
-
-    // Clean up any RideGroup/RideOffer/Assignment this order was part of
-    // — without this, a cancelled order could still show up on a rider's
-    // pickup list, or leave a stale offer broadcasting a route/price that
-    // no longer matches reality. Runs best-effort: a failure here must
-    // never block the cancellation/refund itself from completing.
-    try {
-      await handleOrderCancellation(order);
-    } catch (err) {
-      console.error(`[CancelOrder] Dispatch cleanup failed for order ${order.orderNumber} (order is still cancelled):`, err.message);
-    }
-
-    let walletBalance = null;
-    let walletCreditFailed = false;
-
-    if (refundAmount > 0) {
+      // Clean up dispatch data.
       try {
-        // Resolve the real Customer document via accountId, since
-        // order.customerId is the Account _id, not Customer._id.
-        const customer = await Customer.findOne({ accountId: order.customerId });
+        await handleOrderCancellation(
+          order
+        );
+      } catch (
+        dispatchError
+      ) {
+        console.error(
+          `[CancelOrder] Dispatch cleanup failed for ${order.orderNumber}. The order remains cancelled:`,
+          dispatchError
+        );
+      }
 
-        if (customer) {
-          // Atomic find-or-create + increment in a single DB operation.
-          // The previous find-then-create pattern had a race window: two
-          // near-simultaneous requests (e.g. this cancellation firing at the
-          // same moment as the wallet screen loading) could both pass the
-          // findOne check before either had inserted, and the second insert
-          // would collide with the unique index on customerId (E11000).
-          // findOneAndUpdate with upsert:true is a single atomic operation,
-          // so that race can't happen.
-          const wallet = await Wallet.findOneAndUpdate(
-            { customerId: customer._id },
-            {
-              $setOnInsert: { customerId: customer._id },
-              $inc: { balance: refundAmount },
-              $push: {
-                transactions: {
-                  type: "refund",
-                  amount: refundAmount,
-                  reason: withinFreeWindow
-                    ? `Refund for cancelled order ${order.orderNumber}`
-                    : `Refund for cancelled order ${order.orderNumber} (after ₹${cancellationFee} cancellation fee)`,
-                  orderId: order._id,
-                  orderNumber: order.orderNumber,
+      let walletBalance =
+        null;
+
+      let walletCreditFailed =
+        false;
+
+      if (refundAmount > 0) {
+        try {
+          const customer =
+            await Customer.findOne(
+              {
+                accountId:
+                  order.customerId,
+              }
+            );
+
+          if (!customer) {
+            walletCreditFailed =
+              true;
+
+            console.error(
+              `[CancelOrder] Customer profile not found for account ${order.customerId}`
+            );
+          } else {
+            const wallet =
+              await Wallet.findOneAndUpdate(
+                {
+                  customerId:
+                    customer._id,
                 },
-              },
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+
+                {
+                  $setOnInsert: {
+                    customerId:
+                      customer._id,
+                  },
+
+                  $inc: {
+                    balance:
+                      refundAmount,
+                  },
+
+                  $push: {
+                    transactions: {
+                      type: "refund",
+
+                      amount:
+                        refundAmount,
+
+                      reason:
+                        withinFreeWindow
+                          ? `Refund for cancelled order ${order.orderNumber}`
+                          : `Refund for cancelled order ${order.orderNumber} after ₹${cancellationFee} cancellation fee`,
+
+                      orderId:
+                        order._id,
+
+                      orderNumber:
+                        order.orderNumber,
+                    },
+                  },
+                },
+
+                {
+                  upsert: true,
+                  new: true,
+                  setDefaultsOnInsert:
+                    true,
+                }
+              );
+
+            walletBalance =
+              wallet.balance;
+          }
+        } catch (
+          walletError
+        ) {
+          console.error(
+            `[CancelOrder] Wallet credit failed for ${order.orderNumber}:`,
+            walletError
           );
 
-          walletBalance = wallet.balance;
+          walletCreditFailed =
+            true;
         }
-      } catch (walletError) {
-        // The order is already saved as cancelled above — a wallet hiccup
-        // must never turn into a 500 that makes the app think the whole
-        // cancellation failed (the order really did cancel; only the
-        // wallet credit needs a retry/manual reconciliation).
-        console.log("Wallet credit failed during cancelOrder:", walletError);
-        walletCreditFailed = true;
       }
+
+      // Update refund status if wallet credit failed.
+      if (
+        refundAmount > 0 &&
+        walletCreditFailed
+      ) {
+        order.cancellation.refundStatus =
+          "processing";
+
+        try {
+          await order.save();
+        } catch (
+          saveError
+        ) {
+          console.error(
+            `[CancelOrder] Failed to update refund status for ${order.orderNumber}:`,
+            saveError
+          );
+        }
+      }
+
+      // Customer cancellation notification.
+      try {
+        await notifyCustomer(
+          order.customerId,
+          {
+            title:
+              "Order Cancelled",
+
+            body:
+              cancellationFee >
+              0
+                ? `Your order #${order.orderNumber} was cancelled. A ₹${cancellationFee} cancellation fee was applied.`
+                : `Your order #${order.orderNumber} was cancelled free of charge.`,
+
+            type:
+              "order_cancelled",
+
+            orderId:
+              order._id,
+
+            orderNumber:
+              order.orderNumber,
+          }
+        );
+
+        console.log(
+          `[CancelOrder] Customer notification sent for ${order.orderNumber}`
+        );
+      } catch (
+        notificationError
+      ) {
+        console.error(
+          `[CancelOrder] Customer notification failed for ${order.orderNumber}:`,
+          notificationError
+        );
+      }
+
+      return res.json({
+        success: true,
+
+        message:
+          withinFreeWindow
+            ? "Order cancelled free of charge"
+            : `Order cancelled. A ₹${cancellationFee} late cancellation fee was applied`,
+
+        data: {
+          orderNumber:
+            order.orderNumber,
+
+          status:
+            order.status,
+
+          isFreeCancellation:
+            withinFreeWindow,
+
+          cancellationFee,
+
+          refundAmount,
+
+          refundMode,
+
+          refundStatus:
+            walletCreditFailed
+              ? "processing"
+              : order
+                  .cancellation
+                  .refundStatus,
+
+          walletBalance,
+
+          walletCreditFailed,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "[CancelOrder] Error:",
+        error
+      );
+
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            error.message,
+        });
     }
-
-    return res.json({
-      success: true,
-      message: withinFreeWindow
-        ? "Order cancelled free of charge"
-        : `Order cancelled. A ₹${cancellationFee} late cancellation fee was applied`,
-      data: {
-        orderNumber: order.orderNumber,
-        status: order.status,
-        isFreeCancellation: withinFreeWindow,
-        cancellationFee,
-        refundAmount,
-        refundMode,
-        refundStatus: walletCreditFailed ? "processing" : order.cancellation.refundStatus,
-        walletBalance,
-        walletCreditFailed,
-      },
-    });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// Helper: convert internal status to user-friendly label
-const getStepLabel = (status) => {
-  const map = {
-    pending_sp: 'Order Placed',
-    sp_assigned: 'SP Assigned',
-    sp_accepted: 'SP Accepted',
-    rider_pickup_assigned: 'Rider Assigned for Pickup',
-    picked_up: 'Order Picked Up',
-    at_sp: 'At Service Provider',
-    cleaned: 'Cleaned',
-    rider_delivery_assigned: 'Out for Delivery',
-    delivered: 'Delivered',
-    cancelled: 'Cancelled'
   };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tracking helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const getStepLabel = (
+  status
+) => {
+  const map = {
+    pending_sp:
+      "Order Placed",
+
+    sp_assigned:
+      "SP Assigned",
+
+    sp_accepted:
+      "SP Accepted",
+
+    rider_pickup_assigned:
+      "Rider Assigned for Pickup",
+
+    picked_up:
+      "Order Picked Up",
+
+    at_sp:
+      "At Service Provider",
+
+    cleaned:
+      "Cleaned",
+
+    rider_delivery_assigned:
+      "Out for Delivery",
+
+    delivered:
+      "Delivered",
+
+    cancelled:
+      "Cancelled",
+  };
+
   return map[status] || status;
 };
 
-// Helper: build tracking steps from order.statusHistory
-const buildTrackingSteps = (order) => {
+const buildTrackingSteps = (
+  order
+) => {
   const steps = [];
-  const history = order.statusHistory || [];
-  // Order of steps as per your schema
+
+  const history =
+    order.statusHistory || [];
+
   const stepOrder = [
-    'pending_sp', 'sp_assigned', 'sp_accepted', 'rider_pickup_assigned',
-    'picked_up', 'at_sp', 'cleaned', 'rider_delivery_assigned', 'delivered', 'cancelled'
+    "pending_sp",
+    "sp_assigned",
+    "sp_accepted",
+    "rider_pickup_assigned",
+    "picked_up",
+    "at_sp",
+    "cleaned",
+    "rider_delivery_assigned",
+    "delivered",
+    "cancelled",
   ];
 
   for (const stepStatus of stepOrder) {
-    const entry = history.find(h => h.status === stepStatus);
-    const completed = !!entry;
-    const isEstimate = !completed && stepStatus === 'rider_delivery_assigned';
-    let time = '';
-    if (completed && entry?.updatedAt) {
-      time = new Date(entry.updatedAt).toLocaleString();
-    } else if (isEstimate && order.status !== 'delivered' && order.status !== 'cancelled') {
-      // Estimate based on 'cleaned' time or createdAt + 2 hours
-      const baseTime = history.find(h => h.status === 'cleaned')?.updatedAt || order.createdAt;
+    const entry =
+      history.find(
+        (historyItem) =>
+          historyItem.status ===
+          stepStatus
+      );
+
+    const completed =
+      Boolean(entry);
+
+    const isEstimate =
+      !completed &&
+      stepStatus ===
+        "rider_delivery_assigned";
+
+    let time = "";
+
+    if (
+      completed &&
+      entry?.updatedAt
+    ) {
+      time = new Date(
+        entry.updatedAt
+      ).toLocaleString();
+    } else if (
+      isEstimate &&
+      order.status !==
+        "delivered" &&
+      order.status !==
+        "cancelled"
+    ) {
+      const cleanedEntry =
+        history.find(
+          (historyItem) =>
+            historyItem.status ===
+            "cleaned"
+        );
+
+      const baseTime =
+        cleanedEntry?.updatedAt ||
+        order.createdAt;
+
       if (baseTime) {
-        const est = new Date(new Date(baseTime).getTime() + 2 * 60 * 60 * 1000);
-        time = `Est. ${est.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        const estimatedTime =
+          new Date(
+            new Date(
+              baseTime
+            ).getTime() +
+              2 *
+                60 *
+                60 *
+                1000
+          );
+
+        time =
+          `Est. ${estimatedTime.toLocaleTimeString(
+            [],
+            {
+              hour:
+                "2-digit",
+              minute:
+                "2-digit",
+            }
+          )}`;
       }
     }
+
     steps.push({
-      label: getStepLabel(stepStatus),
+      label:
+        getStepLabel(
+          stepStatus
+        ),
+
       time,
+
       completed,
-      isEstimate: isEstimate && !completed
+
+      isEstimate:
+        isEstimate &&
+        !completed,
     });
   }
 
-  // If order is cancelled, show only up to cancelled step
-  if (order.status === 'cancelled') {
-    const cancelIdx = steps.findIndex(s => s.label === 'Cancelled');
-    return steps.slice(0, cancelIdx + 1);
+  if (
+    order.status ===
+    "cancelled"
+  ) {
+    const cancelIndex =
+      steps.findIndex(
+        (step) =>
+          step.label ===
+          "Cancelled"
+      );
+
+    return steps.slice(
+      0,
+      cancelIndex + 1
+    );
   }
-  // Show all completed steps + next pending step
-  const currentIdx = steps.findIndex(s => s.label === getStepLabel(order.status));
-  return steps.slice(0, currentIdx + 2);
+
+  const currentIndex =
+    steps.findIndex(
+      (step) =>
+        step.label ===
+        getStepLabel(
+          order.status
+        )
+    );
+
+  if (currentIndex < 0) {
+    return steps.slice(0, 1);
+  }
+
+  return steps.slice(
+    0,
+    currentIndex + 2
+  );
 };
 
-// GET /api/orders/active
-exports.getActiveOrder = async (req, res) => {
-  try {
-    const activeStatuses = [
-      'pending_sp', 'sp_assigned', 'sp_accepted', 'rider_pickup_assigned',
-      'picked_up', 'at_sp', 'cleaned', 'rider_delivery_assigned'
-    ];
-    const orders = await Order.find({
-      customerId: req.user.id,
-      status: { $in: activeStatuses }
-    }).sort({ createdAt: -1 });
+// ─────────────────────────────────────────────────────────────────────────────
+// Active orders
+// ─────────────────────────────────────────────────────────────────────────────
 
-    if (!orders || orders.length === 0) {
-      return res.status(200).json({ success: true, data: [] });
-    }
+exports.getActiveOrder =
+  async (req, res) => {
+    try {
+      const activeStatuses = [
+        "pending_sp",
+        "sp_assigned",
+        "sp_accepted",
+        "rider_pickup_assigned",
+        "picked_up",
+        "at_sp",
+        "cleaned",
+        "rider_delivery_assigned",
+      ];
 
-    // Format each order
-    const formattedOrders = orders.map(order => {
-      const orderSummary = {
-        id: order.orderNumber,
-        service: order.items[0]?.serviceName || 'Laundry',
-        items: order.items.reduce((sum, i) => sum + i.quantity, 0),
-        date: new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        price: order.totalAmount,
-        status: order.status,
-        iconName: 'package-variant'
-      };
-      const trackingSteps = buildTrackingSteps(order);
-      let cancellationDeadline = null;
-      if (order.createdAt && order.status === 'pending_sp') {
-        cancellationDeadline = new Date(new Date(order.createdAt).getTime() + 2 * 60 * 60 * 1000);
+      const orders =
+        await Order.find({
+          customerId:
+            req.user.id,
+
+          status: {
+            $in: activeStatuses,
+          },
+        }).sort({
+          createdAt: -1,
+        });
+
+      if (
+        !orders ||
+        orders.length === 0
+      ) {
+        return res
+          .status(200)
+          .json({
+            success: true,
+            data: [],
+          });
       }
-      return {
-        order: orderSummary,
-        tracking: trackingSteps,
-        cancellationDeadline
-      };
-    });
 
-    res.json({
-      success: true,
-      data: formattedOrders
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
+      const formattedOrders =
+        orders.map(
+          (order) => {
+            const orderSummary = {
+              id:
+                order.orderNumber,
 
-// GET /api/orders/history
-exports.getOrderHistory = async (req, res) => {
+              service:
+                order.items[0]
+                  ?.serviceName ||
+                "Laundry",
 
-  try {
-    console.log("USER ID:", req.user.id);
+              items:
+                order.items.reduce(
+                  (
+                    sum,
+                    item
+                  ) =>
+                    sum +
+                    item.quantity,
+                  0
+                ),
 
+              date:
+                new Date(
+                  order.createdAt
+                ).toLocaleDateString(
+                  "en-US",
+                  {
+                    month:
+                      "short",
+                    day:
+                      "numeric",
+                    year:
+                      "numeric",
+                  }
+                ),
 
-    const historyOrders = await Order.find({
-      customerId: req.user.id,
-      status: { $in: ['delivered', 'cancelled'] }
-    }).sort({ createdAt: -1 });
-    console.log("ORDERS FOUND:", historyOrders.length);
+              price:
+                order.totalAmount,
 
+              status:
+                order.status,
 
-    const formatted = historyOrders.map(order => ({
-      id: order.orderNumber,
-      service: order.items[0]?.serviceName || 'Laundry',
-      items: order.items.reduce((sum, i) => sum + i.quantity, 0),
-      date: new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      price: order.totalAmount,
-      status: order.status === 'delivered' ? 'Delivered' : 'Cancelled',
-      iconName: 'package-variant'
-    }));
+              iconName:
+                "package-variant",
+            };
 
-    res.json({ success: true, data: formatted });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
+            const trackingSteps =
+              buildTrackingSteps(
+                order
+              );
+
+            let cancellationDeadline =
+              null;
+
+            if (
+              order.createdAt &&
+              order.status ===
+                "pending_sp"
+            ) {
+              cancellationDeadline =
+                new Date(
+                  new Date(
+                    order.createdAt
+                  ).getTime() +
+                    FREE_CANCELLATION_WINDOW_MS
+                );
+            }
+
+            return {
+              order:
+                orderSummary,
+
+              tracking:
+                trackingSteps,
+
+              cancellationDeadline,
+            };
+          }
+        );
+
+      return res.json({
+        success: true,
+        data:
+          formattedOrders,
+      });
+    } catch (error) {
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            error.message,
+        });
+    }
+  };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Order history
+// ─────────────────────────────────────────────────────────────────────────────
+
+exports.getOrderHistory =
+  async (req, res) => {
+    try {
+      console.log(
+        "[OrderHistory] User ID:",
+        req.user.id
+      );
+
+      const historyOrders =
+        await Order.find({
+          customerId:
+            req.user.id,
+
+          status: {
+            $in: [
+              "delivered",
+              "cancelled",
+            ],
+          },
+        }).sort({
+          createdAt: -1,
+        });
+
+      console.log(
+        "[OrderHistory] Orders found:",
+        historyOrders.length
+      );
+
+      const formatted =
+        historyOrders.map(
+          (order) => ({
+            id:
+              order.orderNumber,
+
+            service:
+              order.items[0]
+                ?.serviceName ||
+              "Laundry",
+
+            items:
+              order.items.reduce(
+                (
+                  sum,
+                  item
+                ) =>
+                  sum +
+                  item.quantity,
+                0
+              ),
+
+            date:
+              new Date(
+                order.createdAt
+              ).toLocaleDateString(
+                "en-US",
+                {
+                  month:
+                    "short",
+                  day:
+                    "numeric",
+                  year:
+                    "numeric",
+                }
+              ),
+
+            price:
+              order.totalAmount,
+
+            status:
+              order.status ===
+              "delivered"
+                ? "Delivered"
+                : "Cancelled",
+
+            iconName:
+              "package-variant",
+          })
+        );
+
+      return res.json({
+        success: true,
+        data: formatted,
+      });
+    } catch (error) {
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            error.message,
+        });
+    }
+  };
