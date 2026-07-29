@@ -119,8 +119,22 @@ const OrderSchema = new mongoose.Schema({
   // coordinates at order-creation time; kept in sync, never edited
   // independently.
   pickupLocation: {
-    type: { type: String, enum: ["Point"], default: "Point" },
-    coordinates: { type: [Number], default: undefined }, // [lng, lat]
+    // NOTE: deliberately no `default` on either leaf field below.
+    // Mongoose applies leaf-level defaults for a plain nested object
+    // independently of whether the PARENT path (pickupLocation) was
+    // provided at all — so a `default: "Point"` here previously caused
+    // Mongoose to materialize `{ type: "Point" }` (with NO coordinates)
+    // even when createOrder explicitly passed `pickupLocation: undefined`
+    // for orders with an invalid/missing pickup address. A 2dsphere index
+    // tolerates a genuinely MISSING pickupLocation field just fine (it's
+    // simply excluded from the index), but throws a hard "Can't extract
+    // geo keys" error on an INCOMPLETE Point — which is exactly what that
+    // default silently produced on every order whose pickup address
+    // lacked coordinates, breaking order creation entirely. Removing the
+    // default means an omitted pickupLocation stays fully unset, which
+    // the index handles correctly.
+    type: { type: String, enum: ["Point"] },
+    coordinates: { type: [Number] }, // [lng, lat]
   },
 
   // ── Pickup slot / dispatch pipeline (see constants/dispatchConstants.js) ──
