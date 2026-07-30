@@ -18,12 +18,18 @@ router.post('/enroll', upload.fields([
 ]), enrollRider);
 
 // ── Assigned Orders ──────────────────────────────────────────
+// FIXED: this previously returned EVERY rider's assigned orders with no
+// filter at all — any authenticated rider could see every other rider's
+// pickups/deliveries. Now scoped to orders actually assigned to the
+// requesting rider (as either the pickup or delivery rider).
 router.get('/orders/assigned', riderProtect, async (req, res) => {
   try {
-    console.log('[Rider] Fetching assigned orders, user:', req.user?._id ?? req.rider?._id);
+    const riderId = req.rider._id;
+    console.log('[Rider] Fetching assigned orders for rider:', riderId);
 
     const orders = await Order.find({
-      status: { $in: ['rider_pickup_assigned', 'picked_up', 'rider_delivery_assigned', 'delivered'] }
+      status: { $in: ['rider_pickup_assigned', 'picked_up', 'rider_delivery_assigned', 'delivered'] },
+      $or: [{ riderPickupId: riderId }, { riderDeliveryId: riderId }],
     });
 
     console.log('[Rider] Found orders:', orders.length);
@@ -34,38 +40,30 @@ router.get('/orders/assigned', riderProtect, async (req, res) => {
   }
 });
 
-// ── Accept ───────────────────────────────────────────────────
-router.post('/orders/:id/accept', riderProtect, async (req, res) => {
-  try {
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      {
-        $set: { riderStatus: 'accepted' },
-        $push: { statusHistory: { status: 'rider_accepted', updatedAt: new Date() } }
-      },
-      { new: true });
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-    res.json({ success: true, data: order });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+// ── Accept / Reject — DEPRECATED, DISABLED ──────────────────────
+// These predate the group/auction dispatch system (Phases 1-4) and let
+// ANY authenticated rider directly claim ANY order by its raw Mongo _id,
+// with zero exclusivity lock (two riders racing this would both
+// "succeed") and zero connection to RideGroup/RideOffer/Assignment —
+// completely bypassing the entire dispatch pipeline. Disabled rather
+// than deleted outright, so any client still pointed at these gets a
+// clear, actionable error instead of a bare 404.
+//
+// Use instead: POST /api/ride-offers/:id/accept (see
+// controllers/rideOfferController.js), which goes through
+// services/auctionService.js's atomic, transaction-safe acceptOffer().
+router.post('/orders/:id/accept', riderProtect, (req, res) => {
+  res.status(410).json({
+    success: false,
+    message: 'This endpoint is disabled. Ride pickups are now claimed via POST /api/ride-offers/:id/accept.',
+  });
 });
 
-// ── Reject ───────────────────────────────────────────────────
-router.post('/orders/:id/reject', riderProtect, async (req, res) => {
-  try {
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      {
-        $set: { riderStatus: 'rejected' },
-        $push: { statusHistory: { status: 'rider_rejected', updatedAt: new Date() } }
-      },
-      { new: true });
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-    res.json({ success: true, data: order });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+router.post('/orders/:id/reject', riderProtect, (req, res) => {
+  res.status(410).json({
+    success: false,
+    message: 'This endpoint is disabled and no longer has any effect.',
+  });
 });
 
 router.post('/orders/:id/picked-up', riderProtect, async (req, res) => {
