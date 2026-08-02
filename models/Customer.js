@@ -10,7 +10,7 @@ const CustomerSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  // Removed 'dob' as requested
+  dob: Date,
   profilePhoto: String,
   addresses: [{
     label: String,
