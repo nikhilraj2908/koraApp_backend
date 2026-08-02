@@ -107,6 +107,56 @@ exports.getMyReview = async (req, res) => {
 
 
 // ─────────────────────────────────────────────
+// PATCH /api/reviews/my
+// Update the logged-in customer's existing review
+// ─────────────────────────────────────────────
+exports.updateReview = async (req, res) => {
+  try {
+    const customerId = req.user.id;
+    const {
+      overallRating,
+      categoryRatings,
+      tags,
+      review,
+    } = req.body;
+
+    if (!overallRating || overallRating < 1 || overallRating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Overall rating is required and must be between 1 and 5",
+      });
+    }
+
+    const existing = await Review.findOne({ customerId });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "No review found to update",
+      });
+    }
+
+    existing.overallRating = overallRating;
+    if (categoryRatings !== undefined) existing.categoryRatings = categoryRatings;
+    if (tags !== undefined) existing.tags = tags;
+    if (review !== undefined) existing.review = review;
+
+    await existing.save();
+
+    res.json({
+      success: true,
+      message: "Review updated successfully",
+      data: existing,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+// ─────────────────────────────────────────────
 // GET /api/reviews/all  (Admin)
 // ─────────────────────────────────────────────
 exports.getAllReviews = async (req, res) => {
