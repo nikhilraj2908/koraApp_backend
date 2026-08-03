@@ -260,5 +260,18 @@ router.patch('/availability', riderProtect, restrictTo('rider'), async (req, res
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
+router.patch('/push-token', riderProtect, async (req, res) => {
+  try {
+    const { expoPushToken } = req.body;
+ 
+    if (!expoPushToken) {
+      return res.status(400).json({ success: false, message: 'expoPushToken is required' });
+    }
+ 
+    await Rider.findByIdAndUpdate(req.rider._id, { expoPushToken });
+    res.json({ success: true, message: 'Push token saved' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 module.exports = router;
