@@ -111,29 +111,58 @@ router.post('/orders/:id/delivered', riderProtect, async (req, res) => {
   }
 });
 // ── Register ─────────────────────────────────────────────────
-router.post('/auth/register', async (req, res) => {
+router.post('/auth/register', upload.fields([
+  { name: 'aadhaarFront', maxCount: 1 },
+  { name: 'aadhaarBack', maxCount: 1 },
+  { name: 'drivingLicense', maxCount: 1 },
+  { name: 'rc', maxCount: 1 },
+  { name: 'profilePhoto', maxCount: 1 },
+]), async (req, res) => {
+  let account;
   try {
-    const { fullName, mobile, email, password, dob, gender } = req.body;
+    const {
+      fullName, mobile, email, password, dob, gender, permanentAddress,
+      currentAddress, preferredLocation, emergencyContactName,
+      emergencyContactMobile, vehicleType, vehicleRegNo,
+    } = req.body;
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    const normalizedMobile = (mobile || '').replace(/\D/g, '');
+    const hasTwoWheeler = req.body.hasTwoWheeler === 'true' || req.body.hasTwoWheeler === true;
+    const declarationsAccepted = req.body.declarationsAccepted === 'true' || req.body.declarationsAccepted === true;
+    const aadhaarFront = req.files?.aadhaarFront?.[0];
+    const aadhaarBack = req.files?.aadhaarBack?.[0];
+    const drivingLicense = req.files?.drivingLicense?.[0];
+    const rc = req.files?.rc?.[0];
+    const profilePhoto = req.files?.profilePhoto?.[0];
 
-    if (!fullName || !mobile || !email || !password || !dob || !gender) {
-      return res.status(400).json({ message: 'Sab fields required hain' });
+    if (!fullName || normalizedMobile.length !== 10 || !normalizedEmail || !password || !dob || !gender || !permanentAddress || !currentAddress) {
+      return res.status(400).json({ message: 'All required personal details must be provided' });
+    }
+    if (!aadhaarFront || !aadhaarBack || !profilePhoto) {
+      return res.status(400).json({ message: 'Aadhaar front, Aadhaar back and profile photo are required' });
+    }
+    if (hasTwoWheeler && (!vehicleType || !vehicleRegNo || !drivingLicense || !rc)) {
+      return res.status(400).json({ message: 'Vehicle details, driving license and RC are required' });
+    }
+    if (!declarationsAccepted) {
+      return res.status(400).json({ message: 'All declarations must be accepted' });
     }
 
-    const existingMobile = await Account.findOne({ mobile });
+    const existingMobile = await Account.findOne({ mobile: normalizedMobile });
     if (existingMobile) {
-      return res.status(400).json({ message: 'Mobile already registered' });
+      return res.status(400).json({ message: 'Mobile number is already registered' });
     }
 
-    const existingEmail = await Account.findOne({ email });
+    const existingEmail = await Account.findOne({ email: normalizedEmail });
     if (existingEmail) {
-      return res.status(400).json({ message: 'Email already registered' });
+      return res.status(400).json({ message: 'Email address is already registered' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const account = await Account.create({
-      email,
-      mobile,
+    account = await Account.create({
+      email: normalizedEmail,
+      mobile: normalizedMobile,
       password: hashedPassword,
       role: 'rider',
     });
@@ -143,13 +172,35 @@ router.post('/auth/register', async (req, res) => {
       fullName,
       dob,
       gender,
+      permanentAddress: permanentAddress.trim(),
+      currentAddress: currentAddress.trim(),
+      preparedLocation: preferredLocation ? { address: preferredLocation.trim() } : undefined,
+      emergencyContact: {
+        name: (emergencyContactName || '').trim(),
+        mobile: (emergencyContactMobile || '').replace(/\D/g, ''),
+      },
+      hasTwoWheeler,
+      vehicleType: hasTwoWheeler ? vehicleType : undefined,
+      vehicleRegNo: hasTwoWheeler ? vehicleRegNo.trim().toUpperCase() : undefined,
+      documents: {
+        aadhaarFront: `/uploads/${aadhaarFront.filename}`,
+        aadhaarBack: `/uploads/${aadhaarBack.filename}`,
+        drivingLicense: drivingLicense ? `/uploads/${drivingLicense.filename}` : undefined,
+        rc: rc ? `/uploads/${rc.filename}` : undefined,
+        profilePhoto: `/uploads/${profilePhoto.filename}`,
+      },
+      declarationsAccepted: true,
+      verificationStatus: 'pending',
+      isVerified: false,
     });
 
     res.status(201).json({
       success: true,
-      message: 'Rider registered successfully',
+      message: 'Rider registration submitted for verification',
+      rider: { id: rider._id, verificationStatus: rider.verificationStatus },
     });
   } catch (err) {
+    if (account?._id) await Account.deleteOne({ _id: account._id }).catch(() => undefined);
     console.log('Register error:', err);
     res.status(500).json({ message: err.message });
   }

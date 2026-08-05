@@ -26,6 +26,8 @@ const RiderSchema = new mongoose.Schema({
     rc: String,
     profilePhoto: String
   },
+  declarationsAccepted: { type: Boolean, required: true, default: false },
+  verificationStatus: { type: String, enum: ['pending', 'verified', 'rejected'], default: 'pending' },
   isVerified: { type: Boolean, default: false },
   totalEarnings: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now }
