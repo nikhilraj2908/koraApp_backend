@@ -1,6 +1,7 @@
 // routes/washer.routes.js
 const express = require("express");
 const router = express.Router();
+const upload = require('../middleware/upload');
 const { washerprotect } = require("../middleware/auth");
 const {
   register,
@@ -19,7 +20,12 @@ const {
 } = require("../controllers/washerOrderController");
 
 // Auth routes
-router.post("/auth/register", register);
+router.post("/auth/register", upload.fields([
+  { name: 'shopPhoto', maxCount: 1 },
+  { name: 'aadhaarFront', maxCount: 1 },
+  { name: 'aadhaarBack', maxCount: 1 },
+  { name: 'profilePhoto', maxCount: 1 },
+]), register);
 router.post("/auth/login", login);
 router.get("/auth/me", washerprotect, getMe);
 router.patch("/auth/push-token", washerprotect, savePushToken);

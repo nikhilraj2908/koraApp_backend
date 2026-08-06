@@ -10,20 +10,79 @@ const generateToken = (id) =>
 // washerAuthController.js mein register function temporarily debug karo:
 exports.register = async (req, res) => {
   try {
-    const { name, phone, password } = req.body;
-    console.log('Register called:', { name, phone });
+    const normalizedName = (req.body.name || req.body.fullName || '').trim();
+    const normalizedPhone = (req.body.phone || req.body.mobile || '').replace(/\D/g, '');
+    const normalizedEmail = (req.body.email || '').trim().toLowerCase();
+    let services;
 
-    const exists = await Washer.findOne({ phone });
-    console.log('Exists:', exists ? 'yes' : 'no');
+    try {
+      services = Array.isArray(req.body.services)
+        ? req.body.services
+        : JSON.parse(req.body.services || '[]');
+    } catch {
+      return res.status(400).json({ success: false, message: 'Invalid services selection' });
+    }
 
-    if (exists) return res.status(400).json({ success: false, message: "Phone already registered" });
+    const shopPhoto = req.files?.shopPhoto?.[0];
+    const aadhaarFront = req.files?.aadhaarFront?.[0];
+    const aadhaarBack = req.files?.aadhaarBack?.[0];
+    const profilePhoto = req.files?.profilePhoto?.[0];
+    const requiredDetails = normalizedName && normalizedPhone.length === 10 && normalizedEmail
+      && req.body.password && req.body.dob && req.body.gender && req.body.shopAddress;
 
-    console.log('Creating washer...');
-    const washer = await Washer.create({ name, phone, password });
-    console.log('Washer created:', washer._id);
+    if (!requiredDetails) {
+      return res.status(400).json({ success: false, message: 'All personal and shop details are required' });
+    }
+    if (!Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({ success: false, message: 'Select at least one washing service' });
+    }
+    if (!shopPhoto || !aadhaarFront || !aadhaarBack || !profilePhoto) {
+      return res.status(400).json({ success: false, message: 'Shop photo, profile photo and both Aadhaar images are required' });
+    }
+    if (req.body.declarationsAccepted !== 'true' && req.body.declarationsAccepted !== true) {
+      return res.status(400).json({ success: false, message: 'All declarations must be accepted' });
+    }
 
-    const token = generateToken(washer._id);
-    res.status(201).json({ success: true, token, washer: { id: washer._id, name: washer.name, phone: washer.phone } });
+    const exists = await Washer.findOne({
+      $or: [{ phone: normalizedPhone }, { email: normalizedEmail }],
+    });
+    if (exists) {
+      const message = exists.email === normalizedEmail
+        ? 'Email address is already registered'
+        : 'Phone number is already registered';
+      return res.status(400).json({ success: false, message });
+    }
+
+    const washer = await Washer.create({
+      name: normalizedName,
+      phone: normalizedPhone,
+      email: normalizedEmail,
+      password: req.body.password,
+      dob: new Date(req.body.dob),
+      gender: req.body.gender,
+      shopAddress: req.body.shopAddress.trim(),
+      shopPhoto: `/uploads/${shopPhoto.filename}`,
+      services,
+      experience: Number(req.body.experience) || 0,
+      aadhaarFront: `/uploads/${aadhaarFront.filename}`,
+      aadhaarBack: `/uploads/${aadhaarBack.filename}`,
+      profilePhoto: `/uploads/${profilePhoto.filename}`,
+      declarationsAccepted: true,
+      verificationStatus: 'pending',
+      isVerified: false,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Registration submitted for verification',
+      washer: {
+        id: washer._id,
+        name: washer.name,
+        phone: washer.phone,
+        email: washer.email,
+        verificationStatus: washer.verificationStatus,
+      },
+    });
   } catch (err) {
     console.log('Register error:', err.stack); // ← stack trace
     res.status(500).json({ success: false, message: err.message });
