@@ -123,6 +123,8 @@ router.post('/auth/register', upload.fields([
       currentAddress, preferredLocation, emergencyContactName,
       emergencyContactMobile, vehicleType, vehicleRegNo,
     } = req.body;
+    const latitude = Number(req.body.latitude);
+    const longitude = Number(req.body.longitude);
     const normalizedEmail = (email || '').trim().toLowerCase();
     const normalizedMobile = (mobile || '').replace(/\D/g, '');
     const hasTwoWheeler = req.body.hasTwoWheeler === 'true' || req.body.hasTwoWheeler === true;
@@ -132,6 +134,19 @@ router.post('/auth/register', upload.fields([
     const drivingLicense = req.files?.drivingLicense?.[0];
     const rc = req.files?.rc?.[0];
     const profilePhoto = req.files?.profilePhoto?.[0];
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return res.status(400).json({
+        message: 'A valid current GPS location is required.',
+      });
+    }
 
     if (!fullName || normalizedMobile.length !== 10 || !normalizedEmail || !password || !dob || !gender || !permanentAddress || !currentAddress) {
       return res.status(400).json({ message: 'All required personal details must be provided' });
@@ -165,7 +180,7 @@ router.post('/auth/register', upload.fields([
       role: 'rider',
     });
 
-    const rider = await Rider.create({
+    const riderData = {
       accountId: account._id,
       fullName,
       dob,
@@ -173,6 +188,11 @@ router.post('/auth/register', upload.fields([
       permanentAddress: permanentAddress.trim(),
       currentAddress: currentAddress.trim(),
       preparedLocation: preferredLocation ? { address: preferredLocation.trim() } : undefined,
+      currentLocation: {
+        type: 'Point',
+        coordinates: [longitude, latitude],
+      },
+      locationUpdatedAt: new Date(),
       emergencyContact: {
         name: (emergencyContactName || '').trim(),
         mobile: (emergencyContactMobile || '').replace(/\D/g, ''),
@@ -190,7 +210,9 @@ router.post('/auth/register', upload.fields([
       declarationsAccepted: true,
       verificationStatus: 'pending',
       isVerified: false,
-    });
+    };
+
+    const rider = await Rider.create(riderData);
 
     res.status(201).json({
       success: true,

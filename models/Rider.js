@@ -39,10 +39,10 @@ const RiderSchema = new mongoose.Schema({
   // `preparedLocation` above, which is a one-time onboarding address, not
   // a live-tracked position.
   currentLocation: {
-    type: { type: String, enum: ["Point"], default: "Point" },
-    coordinates: { type: [Number], default: undefined }, // [lng, lat]
+    type: { type: String, enum: ["Point"], required: true },
+    coordinates: { type: [Number], required: true }, // [lng, lat]
   },
-  locationUpdatedAt: { type: Date, default: null },
+  locationUpdatedAt: { type: Date, required: true },
 
   // Rider has the app open and toggled "online" — a prerequisite for
   // receiving ride offers, separate from isAvailable (online but
