@@ -990,7 +990,12 @@ const buildTrackingSteps = (
     ) {
       time = new Date(
         entry.updatedAt
-      ).toLocaleString();
+      ).toLocaleString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Asia/Kolkata",
+      });
     } else if (
       isEstimate &&
       order.status !==
@@ -1023,12 +1028,16 @@ const buildTrackingSteps = (
 
         time =
           `Est. ${estimatedTime.toLocaleTimeString(
-            [],
+            "en-IN",
             {
               hour:
                 "2-digit",
               minute:
                 "2-digit",
+              hour12:
+                true,
+              timeZone:
+                "Asia/Kolkata",
             }
           )}`;
       }
