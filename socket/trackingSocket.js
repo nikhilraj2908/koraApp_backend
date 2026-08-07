@@ -201,13 +201,13 @@ function buildTrackingSteps(order) {
 
     if (completed && entry?.updatedAt) {
       time = new Date(entry.updatedAt).toLocaleTimeString("en-IN", {
-        hour: "2-digit", minute: "2-digit", hour12: true,
+        hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata",
       });
     } else if (s === "rider_delivery_assigned" && !completed &&
       !["delivered", "cancelled"].includes(order.status)) {
       const base = history.find((h) => h.status === "cleaned")?.updatedAt || order.createdAt;
       const est = new Date(new Date(base).getTime() + 2 * 60 * 60 * 1000);
-      time = `Est. ${est.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}`;
+      time = `Est. ${est.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })}`;
     }
 
     return { status: s, label: STATUS_LABEL[s], icon: STATUS_ICON[s], time, completed, isEst: s === "rider_delivery_assigned" && !completed };
