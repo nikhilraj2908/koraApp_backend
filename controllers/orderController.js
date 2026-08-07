@@ -23,6 +23,17 @@ const {
   ALLOW_MID_PIPELINE_CANCELLATION,
 } = require("../constants/dispatchConstants");
 
+const formatOrderDisplayDateTime = (value) =>
+  new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(value));
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cancellation and refund policy
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1141,18 +1152,8 @@ exports.getActiveOrder =
                 ),
 
               date:
-                new Date(
+                formatOrderDisplayDateTime(
                   order.createdAt
-                ).toLocaleDateString(
-                  "en-US",
-                  {
-                    month:
-                      "short",
-                    day:
-                      "numeric",
-                    year:
-                      "numeric",
-                  }
                 ),
 
               price:
@@ -1270,18 +1271,8 @@ exports.getOrderHistory =
               ),
 
             date:
-              new Date(
+              formatOrderDisplayDateTime(
                 order.createdAt
-              ).toLocaleDateString(
-                "en-US",
-                {
-                  month:
-                    "short",
-                  day:
-                    "numeric",
-                  year:
-                    "numeric",
-                }
               ),
 
             price:
