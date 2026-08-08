@@ -11,7 +11,7 @@ const {
 } = require('../controllers/complaintController');
 
 // User routes
-router.post('/', protect, upload.single('photo'), createComplaint);
+router.post('/', protect,  upload.array("photos", 3), createComplaint);
 router.get('/my', protect, getUserComplaints);
 router.get('/:id', protect, getComplaintById);
 
