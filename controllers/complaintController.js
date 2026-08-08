@@ -4,9 +4,15 @@ const Complaint = require('../models/Complaint');
 exports.createComplaint = async (req, res) => {
   try {
     const { category, orderId, subject, description } = req.body;
-    let photoUrl = '';
-    if (req.file) {
-      photoUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+
+    // req.files (plural) comes from upload.array('photos', 3) — multer
+    // itself already enforces the 3-file cap at the route level; this
+    // just builds the public URL for each file that made it through.
+    let photoUrls = [];
+    if (req.files && req.files.length > 0) {
+      photoUrls = req.files.map(
+        (file) => `${req.protocol}://${req.get('host')}/uploads/${file.filename}`
+      );
     }
 
     const complaint = new Complaint({
@@ -15,7 +21,7 @@ exports.createComplaint = async (req, res) => {
       orderId: orderId || '',
       subject,
       description,
-      photoUrl,
+      photoUrls,
     });
     await complaint.save();
     res.status(201).json({ success: true, message: 'Complaint submitted', complaint });
