@@ -24,10 +24,11 @@ const complaintSchema = new mongoose.Schema({
     required: true,
     maxlength: 1000,
   },
-  photoUrl: {
-    type: String,
-    default: '',
-  },
+  photoUrls: {
+  type: [String],
+  default: [],
+},
+
   status: {
     type: String,
     enum: ['pending', 'in-review', 'resolved', 'rejected'],
