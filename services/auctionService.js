@@ -119,7 +119,7 @@ async function createOfferForGroup(rideGroupId) {
   const nextEscalationAt = dayjs(now).add(config.pricing.escalationIntervalSeconds, "second").toDate();
   const expiresAt = dayjs(now).add(config.auction.riderResponseWindowSeconds, "second").toDate();
 
-  const rideOffer = await RideOffer.create({
+  const offerData = {
     rideGroupId: rideGroup._id,
     pickupSequence: rideGroup.optimizedRoute.sequence,
     totalDistanceMeters: rideGroup.optimizedRoute.totalDistanceMeters,
@@ -135,16 +135,44 @@ async function createOfferForGroup(rideGroupId) {
     notifiedRiderIds: nearbyRiders.map((r) => r._id),
     status: RIDE_OFFER_STATUS.PENDING,
     expiresAt,
-  });
+  };
+
+  // A RideGroup has one offer document. Reuse an expired/cancelled one for
+  // retries rather than violating RideOffer's unique rideGroupId index.
+  let rideOffer = await RideOffer.findOne({ rideGroupId: rideGroup._id });
+  if (rideOffer) {
+    if (rideOffer.status !== RIDE_OFFER_STATUS.EXPIRED && rideOffer.status !== RIDE_OFFER_STATUS.CANCELLED) {
+      console.log(`[Auction] RideGroup ${rideGroupId} already has a ${rideOffer.status} offer — skipping.`);
+      return null;
+    }
+    Object.assign(rideOffer, offerData);
+    rideOffer.acceptedByRiderId = null;
+    rideOffer.acceptedAt = undefined;
+    rideOffer.finalPrice = undefined;
+    await rideOffer.save();
+  } else {
+    rideOffer = await RideOffer.create(offerData);
+  }
 
   rideGroup.status = RIDE_GROUP_STATUS.OFFERED;
   await rideGroup.save();
 
-  await AuctionHistory.create({
-    rideOfferId: rideOffer._id,
-    rideGroupId: rideGroup._id,
-    priceSteps: [{ price: config.pricing.startingOffer, at: now }],
-  });
+  // Keep the per-order dispatch state in sync with the group. This is used
+  // by cancellation and tracking code to distinguish a merely-grouped order
+  // from one that riders can actively accept.
+  await Order.updateMany(
+    { _id: { $in: rideGroup.orderIds } },
+    { $set: { dispatchStatus: "offer_pending" } }
+  );
+
+  await AuctionHistory.findOneAndUpdate(
+    { rideOfferId: rideOffer._id },
+    {
+      $set: { rideGroupId: rideGroup._id, outcome: undefined, acceptedByRiderId: undefined, finalPrice: undefined, timeToAcceptSeconds: undefined },
+      $push: { priceSteps: { price: config.pricing.startingOffer, at: now } },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   await RideNotificationLog.insertMany(
     nearbyRiders.map((r) => ({
