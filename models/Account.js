@@ -25,7 +25,10 @@ const AccountSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['customer', 'rider', 'serviceProvider', 'admin'],
+    // 'admin'    = super admin — full, unrestricted access.
+    // 'subadmin' = created by a super admin, scoped to whatever
+    //              permissions are granted on their models/Admin.js profile.
+    enum: ['customer', 'rider', 'serviceProvider', 'admin', 'subadmin'],
     required: true,
   },
   isVerified: {

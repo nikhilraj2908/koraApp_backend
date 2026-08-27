@@ -27,6 +27,7 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const configRoutes = require('./routes/configRoutes');
 const dispatchRoutes = require('./routes/dispatchRoutes');
 const rideOfferRoutes = require('./routes/rideOfferRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const { getConfig } = require('./repositories/configRepository');
 const mongoose = require('mongoose');
 const { apiLimiter } = require('./middleware/rateLimiter');
@@ -91,6 +92,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/dispatch/config', configRoutes);
 app.use('/api/dispatch', dispatchRoutes);
 app.use('/api/ride-offers', rideOfferRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Ensure the dispatch Configuration document exists before any request
 // (grouping/pricing/scheduler) needs to read it.

@@ -1,4 +1,5 @@
 const Complaint = require('../models/Complaint');
+const { notifyAdmins } = require('../utils/notification');
 
 // Submit a new complaint (user)
 exports.createComplaint = async (req, res) => {
@@ -24,6 +25,17 @@ exports.createComplaint = async (req, res) => {
       photoUrls,
     });
     await complaint.save();
+
+    // Bell icon for admin/subadmin — never let a failure here block the
+    // customer's complaint submission.
+    notifyAdmins({
+      type: 'complaint_raised',
+      title: 'New complaint raised',
+      body: `${category || 'Complaint'}: ${subject}`,
+      referenceId: complaint._id,
+      referenceModel: 'Complaint',
+    });
+
     res.status(201).json({ success: true, message: 'Complaint submitted', complaint });
   } catch (error) {
     res.status(500).json({ error: error.message });

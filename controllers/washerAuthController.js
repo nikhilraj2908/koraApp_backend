@@ -2,6 +2,7 @@
 const Washer = require("../models/Washer");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { notifyAdmins } = require("../utils/notification");
 
 const generateToken = (id) =>
   jwt.sign({ id, role: "washer" }, process.env.JWT_SECRET, { expiresIn: "7d" });
@@ -70,6 +71,16 @@ exports.register = async (req, res) => {
       declarationsAccepted: true,
       verificationStatus: 'pending',
       isVerified: false,
+    });
+
+    // Bell icon for admin/subadmin — never let a failure here block
+    // washer registration itself.
+    notifyAdmins({
+      type: 'washer_signup',
+      title: 'New washer signup',
+      body: `${washer.name} submitted their profile for verification`,
+      referenceId: washer._id,
+      referenceModel: 'Washer',
     });
 
     res.status(201).json({

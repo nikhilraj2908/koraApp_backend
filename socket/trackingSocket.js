@@ -83,6 +83,14 @@ const initSocket = (httpServer) => {
       console.log(`[Socket] Rider ${riderId} joined rider_room`);
     });
 
+    // admin bell — verified admin/subadmin (role decoded from the JWT
+    // during the handshake above) auto-joins their own notification room.
+    // No client-side join event needed: just connect with the token.
+    if (socket.userId && (socket.role === 'admin' || socket.role === 'subadmin')) {
+      socket.join(`admin_notifications_${socket.userId}`);
+      console.log(`[Socket] Admin ${socket.userId} joined their notification room`);
+    }
+
     socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
     });
@@ -222,7 +230,20 @@ const getIO = () => {
   if (!io) throw new Error('Socket.io not initialized');
   return io;
 };
+
+// Real-time push for the admin dashboard's bell icon. Best-effort only —
+// GET /api/notifications is always the source of truth; this just saves a
+// page refresh when it works. Silently no-ops if io isn't initialized yet
+// or the emit fails for any reason.
+function emitAdminNotification(accountId, notification) {
+  try {
+    if (!io) return;
+    io.to(`admin_notifications_${accountId}`).emit('new_notification', notification);
+  } catch (err) {
+    console.log('[Socket] emitAdminNotification failed:', err.message);
+  }
+}
 // initSocket ke andar, io.on("connection") mein ye add karo:
 
 
-module.exports = { initSocket, emitOrderUpdate, emitNewOrderToWashers, getIO, emitPickupRiderNeeded };
+module.exports = { initSocket, emitOrderUpdate, emitNewOrderToWashers, getIO, emitPickupRiderNeeded, emitAdminNotification };

@@ -9,6 +9,7 @@ const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { emitOrderUpdate } = require('../socket/trackingSocket');
+const { notifyAdmins } = require('../utils/notification');
 router.post('/enroll', upload.fields([
   { name: 'aadhaarFront', maxCount: 1 },
   { name: 'aadhaarBack', maxCount: 1 },
@@ -214,6 +215,16 @@ router.post('/auth/register', upload.fields([
 
     const rider = await Rider.create(riderData);
 
+    // Bell icon for admin/subadmin — never let a failure here block
+    // rider registration itself.
+    notifyAdmins({
+      type: 'rider_signup',
+      title: 'New rider signup',
+      body: `${fullName} submitted their profile for verification`,
+      referenceId: rider._id,
+      referenceModel: 'Rider',
+    });
+
     res.status(201).json({
       success: true,
       message: 'Rider registration submitted for verification',
@@ -347,5 +358,4 @@ router.patch('/push-token', riderProtect, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-module.exports = router;
 module.exports = router;
