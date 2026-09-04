@@ -10,7 +10,9 @@ const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { emitOrderUpdate } = require('../socket/trackingSocket');
 const { notifyAdmins, notifyCustomer } = require('../utils/notification');
-router.post('/enroll', upload.fields([
+const { authLimiter } = require('../middleware/rateLimiter');
+
+router.post('/enroll', authLimiter, upload.fields([
   { name: 'aadhaarFront', maxCount: 1 },
   { name: 'aadhaarBack', maxCount: 1 },
   { name: 'drivingLicense', maxCount: 1 },
@@ -300,7 +302,7 @@ router.post('/auth/register', upload.fields([
   }
 });
 
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', authLimiter, async (req, res) => {
   try {
     const { mobile, password } = req.body;
 

@@ -30,7 +30,6 @@ const rideOfferRoutes = require('./routes/rideOfferRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const { getConfig } = require('./repositories/configRepository');
 const mongoose = require('mongoose');
-const { apiLimiter } = require('./middleware/rateLimiter');
 
 connectDB();
 startCronJobs();
@@ -42,7 +41,6 @@ app.use(cors());
 app.use(helmet());
 app.use(express.json());
 app.set('trust proxy', 1);
-app.use(apiLimiter);
 
 // Initialize Socket.IO
 initSocket(httpServer);

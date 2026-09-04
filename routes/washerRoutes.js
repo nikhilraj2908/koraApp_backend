@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const upload = require('../middleware/upload');
 const { washerprotect } = require("../middleware/auth");
+const { authLimiter } = require('../middleware/rateLimiter');
 const {
   register,
   login,
@@ -22,13 +23,13 @@ const {
 const { emitOrderUpdate } = require("../socket/trackingSocket");
 
 // Auth routes
-router.post("/auth/register", upload.fields([
+router.post("/auth/register", authLimiter, upload.fields([
   { name: 'shopPhoto', maxCount: 1 },
   { name: 'aadhaarFront', maxCount: 1 },
   { name: 'aadhaarBack', maxCount: 1 },
   { name: 'profilePhoto', maxCount: 1 },
 ]), register);
-router.post("/auth/login", login);
+router.post("/auth/login", authLimiter, login);
 router.get("/auth/me", washerprotect, getMe);
 router.patch("/auth/push-token", washerprotect, savePushToken);
 
