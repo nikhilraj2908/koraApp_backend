@@ -55,8 +55,9 @@ const OrderSchema = new mongoose.Schema({
 
   customerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Customer",
-    required: true
+    ref: "Account",
+    required: true,
+    index: true,
   },
 
   items: [OrderItemSchema],
@@ -254,8 +255,18 @@ const OrderSchema = new mongoose.Schema({
 
 },
   {
-    timestamps: true
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
   });
+
+// Virtual populate for resolving the customer profile (Customer.accountId -> Order.customerId)
+OrderSchema.virtual("customer", {
+  ref: "Customer",
+  localField: "customerId",
+  foreignField: "accountId",
+  justOne: true
+});
 
 OrderSchema.index({
   customerId: 1,

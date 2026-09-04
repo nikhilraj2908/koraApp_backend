@@ -4,7 +4,7 @@ const reviewSchema = new mongoose.Schema(
   {
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Customer",
+      ref: "Account",
       required: true,
     },
 
@@ -47,7 +47,16 @@ const reviewSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+reviewSchema.virtual("customer", {
+  ref: "Customer",
+  localField: "customerId",
+  foreignField: "accountId",
+  justOne: true,
+});
 
 module.exports = mongoose.model("Review", reviewSchema);

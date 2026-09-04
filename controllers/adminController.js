@@ -57,6 +57,42 @@ const absolutizeOrder = (req, orderDoc) => {
   return order;
 };
 
+// Enriches populated customerId with phone and email from Account if missing on Customer document
+const enrichOrderCustomer = async (orders) => {
+  const orderList = Array.isArray(orders) ? orders : [orders];
+  const missingAccIds = [];
+
+  for (const o of orderList) {
+    const cust = o.customerId;
+    if (cust && cust.accountId && (!cust.phone || !cust.email)) {
+      missingAccIds.push(cust.accountId);
+    }
+  }
+
+  if (missingAccIds.length > 0) {
+    const accounts = await Account.find(
+      { _id: { $in: missingAccIds } },
+      'email mobile'
+    ).lean();
+    const accMap = new Map(accounts.map((a) => [a._id.toString(), a]));
+
+    for (const o of orderList) {
+      const cust = o.customerId;
+      if (cust && cust.accountId) {
+        const acc = accMap.get(cust.accountId.toString());
+        if (acc) {
+          if (!cust.phone && acc.mobile) {
+            cust.phone = acc.mobile;
+          }
+          if (!cust.email && acc.email) {
+            cust.email = acc.email;
+          }
+        }
+      }
+    }
+  }
+};
+
 // Simple pagination helper shared by every list endpoint.
 const getPagination = (req) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -575,7 +611,12 @@ exports.listOrders = async (req, res) => {
 
     const [orders, total] = await Promise.all([
       Order.find(query)
-        .populate({ path: 'customerId', select: 'fullName phone' })
+        .populate({
+          path: 'customerId',
+          model: 'Customer',
+          foreignField: 'accountId',
+          select: 'fullName phone profilePhoto addresses accountId',
+        })
         .populate({ path: 'riderPickupId', select: 'fullName' })
         .populate({ path: 'riderDeliveryId', select: 'fullName' })
         .sort({ createdAt: -1 })
@@ -584,8 +625,11 @@ exports.listOrders = async (req, res) => {
       Order.countDocuments(query),
     ]);
 
+    const absolutizedOrders = orders.map((o) => absolutizeOrder(req, o));
+    await enrichOrderCustomer(absolutizedOrders);
+
     ok(res, {
-      orders: orders.map((o) => absolutizeOrder(req, o)),
+      orders: absolutizedOrders,
       page,
       limit,
       total,
@@ -600,11 +644,18 @@ exports.listOrders = async (req, res) => {
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-      .populate({ path: 'customerId', select: 'fullName phone' })
+      .populate({
+        path: 'customerId',
+        model: 'Customer',
+        foreignField: 'accountId',
+        select: 'fullName phone profilePhoto addresses accountId',
+      })
       .populate({ path: 'riderPickupId', select: 'fullName' })
       .populate({ path: 'riderDeliveryId', select: 'fullName' });
     if (!order) return fail(res, 'Order not found', 404);
-    ok(res, absolutizeOrder(req, order));
+    const absolutized = absolutizeOrder(req, order);
+    await enrichOrderCustomer(absolutized);
+    ok(res, absolutized);
   } catch (err) {
     fail(res, err.message);
   }

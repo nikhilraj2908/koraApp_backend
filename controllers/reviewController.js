@@ -163,8 +163,13 @@ exports.getAllReviews = async (req, res) => {
   try {
     const reviews = await Review.find({ isVisible: true })
       .sort({ createdAt: -1 })
-      .populate("customerId", "name email mobile")
-      .populate("orderId", "orderNumber totalAmount createdAt");
+      .populate({
+        path: 'customerId',
+        model: 'Customer',
+        foreignField: 'accountId',
+        select: 'fullName phone profilePhoto accountId',
+      })
+      .populate('orderId', 'orderNumber totalAmount createdAt');
 
     res.json({ success: true, data: reviews });
 
