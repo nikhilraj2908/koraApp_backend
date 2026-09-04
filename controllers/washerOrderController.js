@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Washer = require("../models/Washer");
 const { sendPushNotification, notifyCustomer } = require("../utils/notification");
@@ -89,19 +90,26 @@ exports.updateOrderStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid status" });
     }
 
+    const rawId = req.params.id;
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
     const order = await Order.findOne({
-      _id: req.params.id,
+      ...(isObjectId ? { _id: rawId } : { orderNumber: rawId }),
       serviceProviderId: req.user.id,
     });
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
     order.status = status;
-    order.statusHistory.push({ status });
+    order.statusHistory.push({ status, updatedAt: new Date() });
+
+    if (status === "cleaned" && !order.estimatedDelivery) {
+      const estDate = new Date(Date.now() + 2 * 60 * 60 * 1000);
+      order.estimatedDelivery = estDate;
+      order.estimatedDeliveryTime = estDate;
+    }
+
     await order.save();
 
     // Customer ko notify
-    // NOTE: same fix as acceptOrder above — order.customerId is the
-    // Account _id, not Customer._id.
     const messages = {
       at_sp: "Your clothes have arrived at the service provider.",
       cleaned: "Your clothes are cleaned and ready for pickup! 👕",
@@ -128,8 +136,9 @@ exports.updateOrderStatus = async (req, res) => {
 exports.completeOrder = async (req, res) => {
   try {
     const orderId = req.params.orderId || req.params.id;
+    const isObjectId = mongoose.Types.ObjectId.isValid(orderId);
     const order = await Order.findOne({
-      _id: orderId,
+      ...(isObjectId ? { _id: orderId } : { orderNumber: orderId }),
       serviceProviderId: req.user.id || req.user._id,
     });
     if (!order) {
@@ -146,6 +155,13 @@ exports.completeOrder = async (req, res) => {
       note: "Laundry processing completed by washer",
       updatedAt: new Date(),
     });
+
+    if (!order.estimatedDelivery) {
+      const estDate = new Date(Date.now() + 2 * 60 * 60 * 1000);
+      order.estimatedDelivery = estDate;
+      order.estimatedDeliveryTime = estDate;
+    }
+
     await order.save();
 
     notifyCustomer(order.customerId, {

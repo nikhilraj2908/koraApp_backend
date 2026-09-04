@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const { notifyCustomer } = require("../utils/notification");
 
@@ -196,8 +197,13 @@ const formatOrderForApp = (order) => {
  */
 exports.trackOrder = async (req, res) => {
   try {
+    const rawId = req.params.orderNumber;
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
     const order = await Order.findOne({
-      orderNumber: req.params.orderNumber,
+      $or: [
+        { orderNumber: rawId },
+        ...(isObjectId ? [{ _id: rawId }] : []),
+      ],
     })
       .populate({
         path: "riderPickupId",
@@ -367,7 +373,17 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
 
-    const order = await Order.findById(req.params.id);
+    const rawId = req.params.id;
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
+    let order = isObjectId ? await Order.findById(rawId) : null;
+    if (!order) {
+      order = await Order.findOne({
+        $or: [
+          { orderNumber: rawId },
+          ...(isObjectId ? [{ _id: rawId }] : []),
+        ],
+      });
+    }
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }

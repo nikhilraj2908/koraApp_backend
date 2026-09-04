@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
@@ -465,116 +466,112 @@ exports.getRecentOrders =
 // Order details
 // ─────────────────────────────────────────────────────────────────────────────
 
-exports.getOrderDetails =
-  async (req, res) => {
-    try {
-      const order =
-        await Order.findOne({
-          orderNumber:
-            req.params.id,
-        });
+exports.getOrderDetails = async (req, res) => {
+  try {
+    const rawId = req.params.id;
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
+    let query = Order.findOne({
+      $or: [
+        { orderNumber: rawId },
+        ...(isObjectId ? [{ _id: rawId }] : []),
+      ],
+    });
 
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found",
-          });
-      }
-
-      // Customer users should not be able to access another customer's order.
-      // Admin and subadmin staff are authorized to inspect order details.
-      const isOwner =
-        order.customerId &&
-        order.customerId.toString() === req.user.id;
-      const isAdminStaff = ["admin", "subadmin"].includes(req.user.role);
-
-      if (!isOwner && !isAdminStaff) {
-        return res
-          .status(403)
-          .json({
-            success: false,
-            message:
-              "You are not authorized to view this order",
-          });
-      }
-
-      return res.json({
-        success: true,
-        data: order,
-      });
-    } catch (error) {
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            error.message,
-        });
+    if (query && typeof query.populate === 'function') {
+      query = query
+        .populate({ path: "riderPickupId", select: "fullName phone vehicleType vehicleRegNo" })
+        .populate({ path: "riderDeliveryId", select: "fullName phone vehicleType vehicleRegNo" })
+        .populate({ path: "serviceProviderId", select: "name phone shopAddress" });
     }
-  };
+
+    const order = await query;
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // Customer users should not be able to access another customer's order.
+    // Admin and subadmin staff are authorized to inspect order details.
+    const isOwner =
+      order.customerId &&
+      order.customerId.toString() === req.user.id;
+    const isAdminStaff = ["admin", "subadmin"].includes(req.user.role);
+
+    if (!isOwner && !isAdminStaff) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view this order",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: order,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update status
 // ─────────────────────────────────────────────────────────────────────────────
 
-exports.updateStatus =
-  async (req, res) => {
-    try {
-      const { status } =
-        req.body;
+exports.updateStatus = async (req, res) => {
+  try {
+    const { status, note } = req.body;
 
-      if (!status) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Status is required",
-          });
-      }
-
-      const order =
-        await Order.findById(
-          req.params.id
-        );
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found",
-          });
-      }
-
-      order.status = status;
-
-      order.statusHistory.push({
-        status,
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
       });
-
-      await order.save();
-
-      return res.json({
-        success: true,
-        message:
-          "Status updated",
-        data: order,
-      });
-    } catch (error) {
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            error.message,
-        });
     }
-  };
+
+    const rawId = req.params.id;
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
+    const order = await Order.findOne({
+      $or: [
+        { orderNumber: rawId },
+        ...(isObjectId ? [{ _id: rawId }] : []),
+      ],
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    order.status = status;
+    order.statusHistory.push({
+      status,
+      note: note || `Status updated to ${status}`,
+      updatedAt: new Date(),
+    });
+
+    await order.save();
+    emitOrderUpdate(order);
+
+    return res.json({
+      success: true,
+      message: "Status updated",
+      data: order,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cancel order
@@ -582,9 +579,11 @@ exports.updateStatus =
 
 exports.cancelOrder = async (req, res) => {
   try {
-    const existingOrder = await Order.findOne({
-      orderNumber: req.params.id,
-    });
+    const rawId = req.params.id;
+    let existingOrder = await Order.findOne({ orderNumber: rawId });
+    if (!existingOrder && mongoose.Types.ObjectId.isValid(rawId)) {
+      existingOrder = await Order.findById(rawId);
+    }
 
     if (!existingOrder) {
       return res.status(404).json({
