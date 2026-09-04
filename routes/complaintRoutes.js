@@ -15,8 +15,8 @@ router.post('/', protect,  upload.array("photos", 3), createComplaint);
 router.get('/my', protect, getUserComplaints);
 router.get('/:id', protect, getComplaintById);
 
-// Admin routes
-router.get('/admin/all', protect, restrictTo('admin'), getAllComplaints);
-router.patch('/admin/:id/status', protect, restrictTo('admin'), updateComplaintStatus);
+// Admin / subadmin routes
+router.get('/admin/all', protect, restrictTo('admin', 'subadmin'), getAllComplaints);
+router.patch('/admin/:id/status', protect, restrictTo('admin', 'subadmin'), updateComplaintStatus);
 
 module.exports = router;

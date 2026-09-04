@@ -3,8 +3,9 @@ const mongoose = require('mongoose');
 const complaintSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Customer',        // adjust to your user model (Customer, User, etc.)
+    ref: 'Account',
     required: true,
+    index: true,
   },
   category: {
     type: String,           // e.g. "Order Issue - Damaged Item"
@@ -25,10 +26,9 @@ const complaintSchema = new mongoose.Schema({
     maxlength: 1000,
   },
   photoUrls: {
-  type: [String],
-  default: [],
-},
-
+    type: [String],
+    default: [],
+  },
   status: {
     type: String,
     enum: ['pending', 'in-review', 'resolved', 'rejected'],
@@ -40,6 +40,16 @@ const complaintSchema = new mongoose.Schema({
   },
 }, {
   timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true },
+});
+
+// Virtual populate for resolving the customer profile (Customer.accountId -> Complaint.user)
+complaintSchema.virtual('customer', {
+  ref: 'Customer',
+  localField: 'user',
+  foreignField: 'accountId',
+  justOne: true,
 });
 
 module.exports = mongoose.model('Complaint', complaintSchema);

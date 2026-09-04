@@ -53,15 +53,17 @@ exports.getUserComplaints = async (req, res) => {
   }
 };
 
-// Get a single complaint by ID (owner or admin)
+// Get a single complaint by ID (owner or admin staff)
 exports.getComplaintById = async (req, res) => {
   try {
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) {
       return res.status(404).json({ error: 'Complaint not found' });
     }
-    // Allow owner or admin (role check)
-    if (complaint.user.toString() !== req.user.id && req.user.role !== 'admin') {
+    // Allow owner or admin staff (role check)
+    const isOwner = complaint.user.toString() === req.user.id;
+    const isAdminStaff = ['admin', 'subadmin'].includes(req.user.role);
+    if (!isOwner && !isAdminStaff) {
       return res.status(403).json({ error: 'Unauthorized' });
     }
     res.json({ success: true, complaint });
@@ -70,12 +72,41 @@ exports.getComplaintById = async (req, res) => {
   }
 };
 
-// Admin: get all complaints
+// Admin / subadmin: get all complaints
 exports.getAllComplaints = async (req, res) => {
   try {
-    const complaints = await Complaint.find()
-      .populate('user', 'name email')   // populate from your user model
+    const Customer = require('../models/Customer');
+    const complaintsRaw = await Complaint.find()
+      .populate('user', 'email mobile')
       .sort({ createdAt: -1 });
+
+    const userAccountIds = complaintsRaw.map((c) => c.user?._id || c.user).filter(Boolean);
+    const customers = await Customer.find({ accountId: { $in: userAccountIds } }).select(
+      'accountId fullName phone'
+    );
+    const customerByAccountId = new Map(
+      customers.map((c) => [c.accountId.toString(), c])
+    );
+
+    const complaints = complaintsRaw.map((complaint) => {
+      const cObj = complaint.toObject();
+      const accountIdStr = (cObj.user?._id || cObj.user || '').toString();
+      const customer = customerByAccountId.get(accountIdStr);
+      if (customer) {
+        cObj.customer = {
+          _id: customer._id,
+          fullName: customer.fullName,
+          phone: customer.phone,
+        };
+        if (cObj.user && typeof cObj.user === 'object') {
+          cObj.user.fullName = customer.fullName;
+          cObj.user.phone = customer.phone;
+          cObj.user.name = customer.fullName;
+        }
+      }
+      return cObj;
+    });
+
     res.json({ success: true, complaints });
   } catch (error) {
     res.status(500).json({ error: error.message });

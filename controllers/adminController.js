@@ -398,14 +398,40 @@ exports.listComplaints = async (req, res) => {
     const query = {};
     if (req.query.status) query.status = req.query.status;
 
-    const [complaints, total] = await Promise.all([
+    const [complaintsRaw, total] = await Promise.all([
       Complaint.find(query)
-        .populate({ path: 'user', select: 'fullName phone' })
+        .populate({ path: 'user', select: 'email mobile' })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
       Complaint.countDocuments(query),
     ]);
+
+    const userAccountIds = complaintsRaw.map((c) => c.user?._id || c.user).filter(Boolean);
+    const customers = await Customer.find({ accountId: { $in: userAccountIds } }).select(
+      'accountId fullName phone'
+    );
+    const customerByAccountId = new Map(
+      customers.map((c) => [c.accountId.toString(), c])
+    );
+
+    const complaints = complaintsRaw.map((complaint) => {
+      const cObj = complaint.toObject();
+      const accountIdStr = (cObj.user?._id || cObj.user || '').toString();
+      const customer = customerByAccountId.get(accountIdStr);
+      if (customer) {
+        cObj.customer = {
+          _id: customer._id,
+          fullName: customer.fullName,
+          phone: customer.phone,
+        };
+        if (cObj.user && typeof cObj.user === 'object') {
+          cObj.user.fullName = customer.fullName;
+          cObj.user.phone = customer.phone;
+        }
+      }
+      return cObj;
+    });
 
     ok(res, { complaints, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
@@ -418,10 +444,28 @@ exports.getComplaintById = async (req, res) => {
   try {
     const complaint = await Complaint.findById(req.params.id).populate({
       path: 'user',
-      select: 'fullName phone',
+      select: 'email mobile',
     });
     if (!complaint) return fail(res, 'Complaint not found', 404);
-    ok(res, complaint);
+
+    const cObj = complaint.toObject();
+    const accountIdStr = (cObj.user?._id || cObj.user || '').toString();
+    const customer = await Customer.findOne({ accountId: accountIdStr }).select(
+      'accountId fullName phone'
+    );
+    if (customer) {
+      cObj.customer = {
+        _id: customer._id,
+        fullName: customer.fullName,
+        phone: customer.phone,
+      };
+      if (cObj.user && typeof cObj.user === 'object') {
+        cObj.user.fullName = customer.fullName;
+        cObj.user.phone = customer.phone;
+      }
+    }
+
+    ok(res, cObj);
   } catch (err) {
     fail(res, err.message);
   }
