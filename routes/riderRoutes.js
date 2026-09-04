@@ -174,133 +174,19 @@ router.post('/orders/:id/delivered', riderProtect, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// ── Register ─────────────────────────────────────────────────
-router.post('/auth/register', upload.fields([
-  { name: 'aadhaarFront', maxCount: 1 },
-  { name: 'aadhaarBack', maxCount: 1 },
-  { name: 'drivingLicense', maxCount: 1 },
-  { name: 'rc', maxCount: 1 },
-  { name: 'profilePhoto', maxCount: 1 },
-]), async (req, res) => {
-  let account;
-  try {
-    const {
-      fullName, mobile, email, password, dob, gender, permanentAddress,
-      currentAddress, preferredLocation, emergencyContactName,
-      emergencyContactMobile, vehicleType, vehicleRegNo,
-    } = req.body;
-    const latitude = Number(req.body.latitude);
-    const longitude = Number(req.body.longitude);
-    const normalizedEmail = (email || '').trim().toLowerCase();
-    const normalizedMobile = (mobile || '').replace(/\D/g, '');
-    const hasTwoWheeler = req.body.hasTwoWheeler === 'true' || req.body.hasTwoWheeler === true;
-    const declarationsAccepted = req.body.declarationsAccepted === 'true' || req.body.declarationsAccepted === true;
-    const aadhaarFront = req.files?.aadhaarFront?.[0];
-    const aadhaarBack = req.files?.aadhaarBack?.[0];
-    const drivingLicense = req.files?.drivingLicense?.[0];
-    const rc = req.files?.rc?.[0];
-    const profilePhoto = req.files?.profilePhoto?.[0];
-
-    if (
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude) ||
-      latitude < -90 ||
-      latitude > 90 ||
-      longitude < -180 ||
-      longitude > 180
-    ) {
-      return res.status(400).json({
-        message: 'A valid current GPS location is required.',
-      });
-    }
-
-    if (!fullName || normalizedMobile.length !== 10 || !normalizedEmail || !password || !dob || !gender || !permanentAddress || !currentAddress) {
-      return res.status(400).json({ message: 'All required personal details must be provided' });
-    }
-    if (!aadhaarFront || !aadhaarBack || !profilePhoto) {
-      return res.status(400).json({ message: 'Aadhaar front, Aadhaar back and profile photo are required' });
-    }
-    if (hasTwoWheeler && (!vehicleType || !vehicleRegNo || !drivingLicense || !rc)) {
-      return res.status(400).json({ message: 'Vehicle details, driving license and RC are required' });
-    }
-    if (!declarationsAccepted) {
-      return res.status(400).json({ message: 'All declarations must be accepted' });
-    }
-
-    const existingMobile = await Account.findOne({ mobile: normalizedMobile });
-    if (existingMobile) {
-      return res.status(400).json({ message: 'Mobile number is already registered' });
-    }
-
-    const existingEmail = await Account.findOne({ email: normalizedEmail });
-    if (existingEmail) {
-      return res.status(400).json({ message: 'Email address is already registered' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    account = await Account.create({
-      email: normalizedEmail,
-      mobile: normalizedMobile,
-      password: hashedPassword,
-      role: 'rider',
-    });
-
-    const riderData = {
-      accountId: account._id,
-      fullName,
-      dob,
-      gender,
-      permanentAddress: permanentAddress.trim(),
-      currentAddress: currentAddress.trim(),
-      preparedLocation: preferredLocation ? { address: preferredLocation.trim() } : undefined,
-      currentLocation: {
-        type: 'Point',
-        coordinates: [longitude, latitude],
-      },
-      locationUpdatedAt: new Date(),
-      emergencyContact: {
-        name: (emergencyContactName || '').trim(),
-        mobile: (emergencyContactMobile || '').replace(/\D/g, ''),
-      },
-      hasTwoWheeler,
-      vehicleType: hasTwoWheeler ? vehicleType : undefined,
-      vehicleRegNo: hasTwoWheeler ? vehicleRegNo.trim().toUpperCase() : undefined,
-      documents: {
-        aadhaarFront: `/uploads/${aadhaarFront.filename}`,
-        aadhaarBack: `/uploads/${aadhaarBack.filename}`,
-        drivingLicense: drivingLicense ? `/uploads/${drivingLicense.filename}` : undefined,
-        rc: rc ? `/uploads/${rc.filename}` : undefined,
-        profilePhoto: `/uploads/${profilePhoto.filename}`,
-      },
-      declarationsAccepted: true,
-      verificationStatus: 'pending',
-      isVerified: false,
-    };
-
-    const rider = await Rider.create(riderData);
-
-    // Bell icon for admin/subadmin — never let a failure here block
-    // rider registration itself.
-    notifyAdmins({
-      type: 'rider_signup',
-      title: 'New rider signup',
-      body: `${fullName} submitted their profile for verification`,
-      referenceId: rider._id,
-      referenceModel: 'Rider',
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Rider registration submitted for verification',
-      rider: { id: rider._id, verificationStatus: rider.verificationStatus },
-    });
-  } catch (err) {
-    if (account?._id) await Account.deleteOne({ _id: account._id }).catch(() => undefined);
-    console.log('Register error:', err);
-    res.status(500).json({ message: err.message });
-  }
-});
+// ── Register / Enroll ────────────────────────────────────────
+router.post(
+  '/auth/register',
+  authLimiter,
+  upload.fields([
+    { name: 'aadhaarFront', maxCount: 1 },
+    { name: 'aadhaarBack', maxCount: 1 },
+    { name: 'drivingLicense', maxCount: 1 },
+    { name: 'rc', maxCount: 1 },
+    { name: 'profilePhoto', maxCount: 1 },
+  ]),
+  enrollRider
+);
 
 router.post('/auth/login', authLimiter, async (req, res) => {
   try {

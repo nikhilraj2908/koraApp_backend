@@ -1,5 +1,6 @@
 // routes/washer.routes.js
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const upload = require('../middleware/upload');
 const { washerprotect } = require("../middleware/auth");
@@ -66,9 +67,11 @@ router.patch("/orders/:id/status", washerprotect, updateOrderStatus);
 
 router.post('/orders/:orderId/request-pickup-rider', washerprotect, async (req, res) => {
   try {
+    const rawId = req.params.orderId;
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
     const order = await Order.findOneAndUpdate(
       {
-        _id: req.params.orderId,
+        ...(isObjectId ? { _id: rawId } : { orderNumber: rawId }),
         serviceProviderId: req.user.id || req.user._id,
       },
       {

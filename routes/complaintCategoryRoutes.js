@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect, restrictTo } = require('../middleware/auth');
+const { publicReadLimiter } = require('../middleware/rateLimiter');
 const {
   getComplaintCategories,
   createComplaintCategory,
@@ -9,7 +10,7 @@ const {
 } = require('../controllers/complaintCategoryController');
 
 // Public: get all active complaint categories
-router.get('/', getComplaintCategories);
+router.get('/', publicReadLimiter, getComplaintCategories);
 
 // Admin only: create, update, delete
 router.post('/', protect, restrictTo('admin'), createComplaintCategory);

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const Account = require('../models/Account');
 const Admin = require('../models/Admin');
@@ -12,6 +13,13 @@ const { emitOrderUpdate } = require('../socket/trackingSocket');
 
 const ok = (res, data, code = 200) => res.status(code).json({ success: true, data });
 const fail = (res, message, code = 500) => res.status(code).json({ success: false, message });
+
+const resolveOrderQuery = (rawId) => {
+  const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
+  return isObjectId
+    ? { $or: [{ _id: rawId }, { orderNumber: rawId }] }
+    : { orderNumber: rawId };
+};
 
 const normalizeMobile = (mobile) => String(mobile || '').replace(/\D/g, '').slice(-10);
 
@@ -687,7 +695,8 @@ exports.listOrders = async (req, res) => {
 // GET /api/admin/orders/:id
 exports.getOrderById = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id)
+    const query = resolveOrderQuery(req.params.id);
+    const order = await Order.findOne(query)
       .populate({
         path: 'customerId',
         model: 'Customer',
@@ -717,8 +726,9 @@ exports.updateOrderStatus = async (req, res) => {
       return fail(res, `Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400);
     }
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
+    const query = resolveOrderQuery(req.params.id);
+    const order = await Order.findOneAndUpdate(
+      query,
       {
         $set: { status },
         $push: { statusHistory: { status, note: note || `Updated by admin`, updatedAt: new Date() } },
@@ -748,8 +758,9 @@ exports.assignOrder = async (req, res) => {
       return fail(res, 'Provide at least one of serviceProviderId, riderPickupId, riderDeliveryId', 400);
     }
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
+    const query = resolveOrderQuery(req.params.id);
+    const order = await Order.findOneAndUpdate(
+      query,
       {
         $set: update,
         $push: { statusHistory: { status: 'reassigned_by_admin', note: 'Reassigned by admin', updatedAt: new Date() } },

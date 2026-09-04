@@ -2,9 +2,9 @@ const express = require("express");
 const router = express.Router();
 
 const { getWallet } = require("../controllers/walletController");
-const { protect } = require("../middleware/auth");
+const { protect, restrictTo } = require("../middleware/auth");
 
-// GET /api/wallet — balance + transaction history
-router.get("/", protect, getWallet);
+// GET /api/wallet — balance + transaction history (customer only)
+router.get("/", protect, restrictTo("customer"), getWallet);
 
 module.exports = router;
