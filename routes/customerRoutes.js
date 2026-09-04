@@ -13,6 +13,7 @@ const {
 } = require('../controllers/customerController');
 
 const { protect, restrictTo } = require('../middleware/auth');
+const { otpLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -40,6 +41,72 @@ router.put(
   protect,
   restrictTo('customer'),
   setInitialMobile
+);
+
+// ─── EMAIL & MOBILE CHANGE (OTP) ─────────────────────────
+
+// Request OTP to change email
+router.post(
+  '/email/request-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  requestEmailOtp
+);
+router.post(
+  '/profile/email/request-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  requestEmailOtp
+);
+
+// Verify OTP to change email
+router.post(
+  '/email/verify-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  verifyEmailOtp
+);
+router.post(
+  '/profile/email/verify-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  verifyEmailOtp
+);
+
+// Request OTP to change mobile number
+router.post(
+  '/mobile/request-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  requestMobileOtp
+);
+router.post(
+  '/profile/mobile/request-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  requestMobileOtp
+);
+
+// Verify OTP to change mobile number
+router.post(
+  '/mobile/verify-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  verifyMobileOtp
+);
+router.post(
+  '/profile/mobile/verify-otp',
+  protect,
+  restrictTo('customer'),
+  otpLimiter,
+  verifyMobileOtp
 );
 
 

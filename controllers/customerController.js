@@ -108,10 +108,12 @@ exports.setInitialMobile = async (req, res) => {
 exports.requestEmailOtp = async (req, res) => {
   try {
     const { newEmail } = req.body;
-    if (!newEmail) return fail(res, 'New email is required', 400);
+    if (!newEmail || typeof newEmail !== 'string') return fail(res, 'New email is required', 400);
+
+    const normalizedEmail = newEmail.trim().toLowerCase();
 
     // Check if email already exists
-    const existingAccount = await Account.findOne({ email: newEmail.toLowerCase() });
+    const existingAccount = await Account.findOne({ email: normalizedEmail });
     if (existingAccount) return fail(res, 'Email already registered', 409);
 
     // Delete any previous OTP for this user/purpose
@@ -122,14 +124,15 @@ exports.requestEmailOtp = async (req, res) => {
 
     await OTP.create({
       accountId: req.user.id,
+      contact: normalizedEmail,
+      newValue: normalizedEmail,
       purpose: 'email_change',
-      newValue: newEmail.toLowerCase(),
       otp,
       expiresAt,
     });
 
     // Send OTP via email
-    await sendEmailOtp(newEmail, otp);
+    await sendEmailOtp(normalizedEmail, otp);
 
     return ok(res, { message: 'OTP sent to new email address' });
   } catch (err) {
@@ -143,10 +146,12 @@ exports.verifyEmailOtp = async (req, res) => {
     const { newEmail, otp } = req.body;
     if (!newEmail || !otp) return fail(res, 'New email and OTP required', 400);
 
+    const normalizedEmail = newEmail.trim().toLowerCase();
+
     const record = await OTP.findOne({
       accountId: req.user.id,
       purpose: 'email_change',
-      newValue: newEmail.toLowerCase(),
+      newValue: normalizedEmail,
       otp,
       expiresAt: { $gt: new Date() },
     });
@@ -154,7 +159,9 @@ exports.verifyEmailOtp = async (req, res) => {
 
     // Update email in Account
     const account = await Account.findById(req.user.id);
-    account.email = newEmail.toLowerCase();
+    if (!account) return fail(res, 'Account not found', 404);
+
+    account.email = normalizedEmail;
     await account.save();
 
     // Clean up used OTP
@@ -169,14 +176,24 @@ exports.verifyEmailOtp = async (req, res) => {
 // ─── REQUEST MOBILE CHANGE OTP ───────────────────────────────────────────
 exports.requestMobileOtp = async (req, res) => {
   try {
-    let { newMobile } = req.body;                     // ✅ use let
+    let { newMobile } = req.body;
     if (!newMobile) return fail(res, 'New mobile number required', 400);
 
-    newMobile = formatPhone(newMobile);               // ✅ format here
+    newMobile = formatPhone(String(newMobile).trim());
+    const digitsOnly = newMobile.replace(/\D/g, '');
+    if (digitsOnly.length < 10) {
+      return fail(res, 'Enter a valid mobile number', 400);
+    }
 
-    // Check if mobile already exists in Customer collection
-    const existingCustomer = await Customer.findOne({ phone: newMobile });
-    if (existingCustomer) return fail(res, 'Mobile number already registered', 409);
+    // Check if mobile already exists in Account or Customer collection
+    const [existingAccount, existingCustomer] = await Promise.all([
+      Account.findOne({ mobile: newMobile }),
+      Customer.findOne({ phone: newMobile }),
+    ]);
+
+    if (existingAccount || existingCustomer) {
+      return fail(res, 'Mobile number already registered', 409);
+    }
 
     // Delete any previous OTP for this purpose
     await OTP.deleteMany({ accountId: req.user.id, purpose: 'mobile_change' });
@@ -186,18 +203,19 @@ exports.requestMobileOtp = async (req, res) => {
 
     await OTP.create({
       accountId: req.user.id,
+      contact: newMobile,
+      newValue: newMobile,
       purpose: 'mobile_change',
-      newValue: newMobile,    // ✅ store formatted
       otp,
       expiresAt,
     });
 
     // Send OTP via SMS
-    await sendSmsOtp(newMobile, otp);   // ✅ send formatted
+    await sendSmsOtp(newMobile, otp);
 
     return ok(res, { message: 'OTP sent to new mobile number' });
   } catch (err) {
-    console.error(err);                 // ✅ log for debugging
+    console.error('requestMobileOtp error:', err);
     return fail(res, err.message);
   }
 };
@@ -207,7 +225,7 @@ exports.verifyMobileOtp = async (req, res) => {
   try {
     let { newMobile, otp } = req.body;
     if (!newMobile || !otp) return fail(res, 'New mobile and OTP required', 400);
-    newMobile = formatPhone(newMobile);   // ✅ format
+    newMobile = formatPhone(String(newMobile).trim());
 
     const record = await OTP.findOne({
       accountId: req.user.id,
@@ -221,8 +239,11 @@ exports.verifyMobileOtp = async (req, res) => {
     const customer = await Customer.findOne({ accountId: req.user.id });
     if (!customer) return fail(res, 'Profile not found', 404);
 
-    customer.phone = newMobile;           // ✅ store formatted
+    customer.phone = newMobile;
     await customer.save();
+
+    // Also update Account.mobile so mobile login remains in sync
+    await Account.findByIdAndUpdate(req.user.id, { $set: { mobile: newMobile } });
 
     await OTP.deleteOne({ _id: record._id });
     return ok(res, { mobile: customer.phone });
