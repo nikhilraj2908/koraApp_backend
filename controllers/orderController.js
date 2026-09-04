@@ -42,6 +42,7 @@ const formatOrderDisplayDateTime = (value) =>
 
 const MAX_CANCELLATION_WINDOW_MS =
   2 * 60 * 60 * 1000; // Strictly 2 hours maximum cancellation window
+const FREE_CANCELLATION_WINDOW_MS = MAX_CANCELLATION_WINDOW_MS;
 
 const PICKUP_STARTED_STATUSES = [
   "picked_up",
