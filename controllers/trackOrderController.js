@@ -143,25 +143,45 @@ const buildTrackingSteps = (order) => {
 /**
  * Map an order document to the shape expected by the React Native screen.
  */
-const formatOrderForApp = (order) => ({
-  id:          order.orderNumber,
-  service:     order.items[0]?.serviceName || "Laundry",
-  items:       order.items.reduce((sum, i) => sum + i.quantity, 0),
-  date:        new Date(order.createdAt).toLocaleDateString("en-IN", {
-    day:   "numeric",
-    month: "short",
-    year:  "numeric",
-    timeZone: "Asia/Kolkata",
-  }),
-  price:         order.totalAmount,
-  status:        order.status,
-  statusLabel:   STATUS_LABEL[order.status] || order.status,
-  pickupAddress: order.pickupAddress,
-  deliveryAddress: order.deliveryAddress,
-  rider: order.deliveryRider || order.pickupRider || null,
-  estimatedDelivery: order.estimatedDeliveryTime || null,
-  trackingSteps: buildTrackingSteps(order),
-});
+const formatOrderForApp = (order) => {
+  // Determine active rider based on the current delivery/pickup lifecycle phase
+  const isDeliveryPhase = ["rider_delivery_assigned", "delivered"].includes(order.status);
+  const activeRiderDoc = isDeliveryPhase
+    ? (order.riderDeliveryId || order.deliveryRider || order.riderPickupId || order.pickupRider)
+    : (order.riderPickupId || order.pickupRider || order.riderDeliveryId || order.deliveryRider);
+
+  let formattedRider = null;
+  if (activeRiderDoc && (activeRiderDoc.fullName || activeRiderDoc.name)) {
+    formattedRider = {
+      _id: activeRiderDoc._id,
+      name: activeRiderDoc.fullName || activeRiderDoc.name,
+      phone: activeRiderDoc.accountId?.mobile || activeRiderDoc.phone || null,
+      vehicleType: activeRiderDoc.vehicleType || null,
+      vehicleRegNo: activeRiderDoc.vehicleRegNo || null,
+      currentLocation: activeRiderDoc.currentLocation || null,
+    };
+  }
+
+  return {
+    id:          order.orderNumber,
+    service:     order.items[0]?.serviceName || "Laundry",
+    items:       order.items.reduce((sum, i) => sum + i.quantity, 0),
+    date:        new Date(order.createdAt).toLocaleDateString("en-IN", {
+      day:   "numeric",
+      month: "short",
+      year:  "numeric",
+      timeZone: "Asia/Kolkata",
+    }),
+    price:         order.totalAmount,
+    status:        order.status,
+    statusLabel:   STATUS_LABEL[order.status] || order.status,
+    pickupAddress: order.pickupAddress,
+    deliveryAddress: order.deliveryAddress,
+    rider: formattedRider,
+    estimatedDelivery: order.estimatedDelivery || order.estimatedDeliveryTime || null,
+    trackingSteps: buildTrackingSteps(order),
+  };
+};
 
 
 /* ════════════════════════════════════════════════
@@ -178,7 +198,27 @@ exports.trackOrder = async (req, res) => {
   try {
     const order = await Order.findOne({
       orderNumber: req.params.orderNumber,
-    }).populate("pickupRider deliveryRider", "name phone");
+    })
+      .populate({
+        path: "riderPickupId",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      })
+      .populate({
+        path: "riderDeliveryId",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      })
+      .populate({
+        path: "pickupRider",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      })
+      .populate({
+        path: "deliveryRider",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      });
 
     if (!order) {
       return res.status(404).json({
@@ -227,7 +267,26 @@ exports.getActiveOrders = async (req, res) => {
       status: { $in: ACTIVE_STATUSES },
     })
       .sort({ createdAt: -1 })
-      .populate("pickupRider deliveryRider", "name phone");
+      .populate({
+        path: "riderPickupId",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      })
+      .populate({
+        path: "riderDeliveryId",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      })
+      .populate({
+        path: "pickupRider",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      })
+      .populate({
+        path: "deliveryRider",
+        select: "fullName accountId currentLocation vehicleType vehicleRegNo",
+        populate: { path: "accountId", select: "mobile" },
+      });
 
     if (!orders.length) {
       return res.json({ success: true, data: [] });
@@ -316,9 +375,11 @@ exports.updateOrderStatus = async (req, res) => {
     order.status = status;
     order.statusHistory.push({ status, note });
 
-    /* Auto-set estimatedDeliveryTime when laundry is cleaned */
-    if (status === "cleaned" && !order.estimatedDeliveryTime) {
-      order.estimatedDeliveryTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    /* Auto-set estimatedDelivery when laundry is cleaned */
+    if (status === "cleaned" && !order.estimatedDelivery && !order.estimatedDeliveryTime) {
+      const estDate = new Date(Date.now() + 2 * 60 * 60 * 1000);
+      order.estimatedDelivery = estDate;
+      order.estimatedDeliveryTime = estDate;
     }
 
     await order.save();

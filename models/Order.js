@@ -268,6 +268,31 @@ OrderSchema.virtual("customer", {
   justOne: true
 });
 
+// Virtual populate for resolving pickup rider (Rider._id -> Order.riderPickupId)
+OrderSchema.virtual("pickupRider", {
+  ref: "Rider",
+  localField: "riderPickupId",
+  foreignField: "_id",
+  justOne: true
+});
+
+// Virtual populate for resolving delivery rider (Rider._id -> Order.riderDeliveryId)
+OrderSchema.virtual("deliveryRider", {
+  ref: "Rider",
+  localField: "riderDeliveryId",
+  foreignField: "_id",
+  justOne: true
+});
+
+// Virtual alias allowing estimatedDeliveryTime to read/write estimatedDelivery
+OrderSchema.virtual("estimatedDeliveryTime")
+  .get(function () {
+    return this.estimatedDelivery;
+  })
+  .set(function (val) {
+    this.estimatedDelivery = val;
+  });
+
 OrderSchema.index({
   customerId: 1,
   status: 1
