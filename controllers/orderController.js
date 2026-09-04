@@ -59,7 +59,7 @@ exports.createOrder = async (req, res) => {
   try {
     const customerId = req.user.id;
 
-    const {
+    let {
       items,
       pickupAddress,
       deliveryAddress,
@@ -68,6 +68,34 @@ exports.createOrder = async (req, res) => {
       pickupDay,
       timeSlot,
     } = req.body;
+
+    // When cloth photos are attached, the request arrives as
+    // multipart/form-data instead of application/json — multer parses the
+    // files into req.files, but every other field (including these) comes
+    // through as a plain string, not a parsed object/array. A pure-JSON
+    // request (no photos) is unaffected since these are already
+    // objects/arrays in that case.
+    if (typeof items === "string") {
+      try {
+        items = JSON.parse(items);
+      } catch {
+        return res.status(400).json({ success: false, message: "Invalid items payload" });
+      }
+    }
+    if (typeof pickupAddress === "string") {
+      try {
+        pickupAddress = JSON.parse(pickupAddress);
+      } catch {
+        return res.status(400).json({ success: false, message: "Invalid pickupAddress payload" });
+      }
+    }
+    if (typeof deliveryAddress === "string") {
+      try {
+        deliveryAddress = JSON.parse(deliveryAddress);
+      } catch {
+        return res.status(400).json({ success: false, message: "Invalid deliveryAddress payload" });
+      }
+    }
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -292,6 +320,18 @@ exports.createOrder = async (req, res) => {
         },
       ],
     };
+
+    // Optional cloth photos, grouped by service type — only present when
+    // the request was multipart/form-data with washPhotos/ironPhotos
+    // file fields attached. Purely optional, matches the "Optional" label
+    // shown in the app: an order with zero photos in either group is
+    // completely normal and unaffected.
+    if (req.files && (req.files.washPhotos?.length || req.files.ironPhotos?.length)) {
+      orderData.clothPhotos = {
+        wash: (req.files.washPhotos || []).map((f) => `/uploads/${f.filename}`),
+        iron: (req.files.ironPhotos || []).map((f) => `/uploads/${f.filename}`),
+      };
+    }
 
     // Avoid storing incomplete GeoJSON.
     if (pickupLocation) {

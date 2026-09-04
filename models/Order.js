@@ -113,6 +113,15 @@ const OrderSchema = new mongoose.Schema({
   pickupAddress: AddressSchema,
   deliveryAddress: AddressSchema,
 
+  // Optional cloth reference photos, grouped by service type so the
+  // washer/rider know exactly which items need washing vs. ironing.
+  // Stored as relative paths (like every other upload in this app) —
+  // /api/admin/orders responses turn these into absolute URLs for display.
+  clothPhotos: {
+    wash: { type: [String], default: [] },
+    iron: { type: [String], default: [] },
+  },
+
   // Dedicated GeoJSON field for spatial queries ($near / $geoNear during
   // clustering) — pickupAddress.coordinates above is a plain array with
   // no index and isn't queryable this way. Populated from the same

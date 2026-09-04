@@ -47,6 +47,16 @@ const absolutizeWasher = (req, washerDoc) => {
   return washer;
 };
 
+// Order.clothPhotos = { wash: [...], iron: [...] } — optional, may be absent.
+const absolutizeOrder = (req, orderDoc) => {
+  const order = orderDoc.toObject ? orderDoc.toObject() : orderDoc;
+  if (order.clothPhotos) {
+    order.clothPhotos.wash = (order.clothPhotos.wash || []).map((p) => absolutize(req, p));
+    order.clothPhotos.iron = (order.clothPhotos.iron || []).map((p) => absolutize(req, p));
+  }
+  return order;
+};
+
 // Simple pagination helper shared by every list endpoint.
 const getPagination = (req) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -574,7 +584,13 @@ exports.listOrders = async (req, res) => {
       Order.countDocuments(query),
     ]);
 
-    ok(res, { orders, page, limit, total, totalPages: Math.ceil(total / limit) });
+    ok(res, {
+      orders: orders.map((o) => absolutizeOrder(req, o)),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     fail(res, err.message);
   }
@@ -588,7 +604,7 @@ exports.getOrderById = async (req, res) => {
       .populate({ path: 'riderPickupId', select: 'fullName' })
       .populate({ path: 'riderDeliveryId', select: 'fullName' });
     if (!order) return fail(res, 'Order not found', 404);
-    ok(res, order);
+    ok(res, absolutizeOrder(req, order));
   } catch (err) {
     fail(res, err.message);
   }

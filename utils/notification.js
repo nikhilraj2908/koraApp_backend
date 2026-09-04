@@ -90,6 +90,7 @@ const ADMIN_NOTIFICATION_PERMISSION = {
  * @param {'Rider'|'Washer'|'Complaint'} payload.referenceModel
  */
 exports.notifyAdmins = async ({ type, title, body, referenceId, referenceModel }) => {
+  console.log(">>> notifyAdmins CALLED with type:", type);
   try {
     // Lazy-required for the same reason as above — avoids a circular
     // require between models/controllers/utils at module-load time.
@@ -111,6 +112,7 @@ exports.notifyAdmins = async ({ type, title, body, referenceId, referenceModel }
         { level: "subadmin", permissions: requiredPermission },
       ],
     });
+    console.log(">>> notifyAdmins found admins:", admins.length, admins.map(a => String(a.accountId)));
 
     if (admins.length === 0) return;
 
