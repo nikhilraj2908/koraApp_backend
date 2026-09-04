@@ -1,7 +1,7 @@
-// controllers/washerOrderController.js
 const Order = require("../models/Order");
 const Washer = require("../models/Washer");
 const { sendPushNotification, notifyCustomer } = require("../utils/notification");
+const { emitOrderUpdate } = require("../socket/trackingSocket");
 
 // GET all pending orders (washer dashboard)
 exports.getPendingOrders = async (req, res) => {
@@ -53,6 +53,8 @@ exports.acceptOrder = async (req, res) => {
       orderId: order._id,
       orderNumber: order.orderNumber,
     });
+
+    emitOrderUpdate(order);
 
     res.json({ success: true, message: "Order accepted", data: order });
   } catch (err) {
@@ -113,8 +115,52 @@ exports.updateOrderStatus = async (req, res) => {
       orderNumber: order.orderNumber,
     });
 
+    emitOrderUpdate(order);
+
     res.json({ success: true, message: "Status updated", data: order });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// POST /api/washer/orders/:id/complete (or :orderId)
+// Washer finishes laundry processing -> marks order as "cleaned"
+exports.completeOrder = async (req, res) => {
+  try {
+    const orderId = req.params.orderId || req.params.id;
+    const order = await Order.findOne({
+      _id: orderId,
+      serviceProviderId: req.user.id || req.user._id,
+    });
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found or unauthorized" });
+    }
+
+    if (order.status === "cleaned") {
+      return res.json({ success: true, message: "Order is already marked as cleaned", data: order });
+    }
+
+    order.status = "cleaned";
+    order.statusHistory.push({
+      status: "cleaned",
+      note: "Laundry processing completed by washer",
+      updatedAt: new Date(),
+    });
+    await order.save();
+
+    notifyCustomer(order.customerId, {
+      title: "Order Update",
+      body: "Your clothes are cleaned and ready for pickup! 👕",
+      type: "order_cleaned",
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
+
+    emitOrderUpdate(order);
+
+    return res.json({ success: true, message: "Order marked as cleaned successfully", data: order });
+  } catch (err) {
+    console.error("[completeOrder] error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

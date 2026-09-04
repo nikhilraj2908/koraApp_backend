@@ -17,7 +17,9 @@ const {
   acceptOrder,
   rejectOrder,
   updateOrderStatus,
+  completeOrder,
 } = require("../controllers/washerOrderController");
+const { emitOrderUpdate } = require("../socket/trackingSocket");
 
 // Auth routes
 router.post("/auth/register", upload.fields([
@@ -63,20 +65,24 @@ router.patch("/orders/:id/status", washerprotect, updateOrderStatus);
 
 router.post('/orders/:orderId/request-pickup-rider', washerprotect, async (req, res) => {
   try {
-    const order = await Order.findByIdAndUpdate(
-      req.params.orderId,
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: req.params.orderId,
+        serviceProviderId: req.user.id || req.user._id,
+      },
       {
         $set: { status: 'rider_pickup_assigned' },
         $push: {
           statusHistory: { status: 'rider_pickup_assigned', updatedAt: new Date() }
         }
       },
-      { new: true }  // ← returnDocument: 'after' ki jagah
+      { new: true }
     );
 
-    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (!order) return res.status(404).json({ message: 'Order not found or unauthorized' });
 
     emitPickupRiderNeeded(order);
+    emitOrderUpdate(order);
 
     res.json({ success: true, data: order });
   } catch (err) {
@@ -84,14 +90,8 @@ router.post('/orders/:orderId/request-pickup-rider', washerprotect, async (req, 
   }
 });
 
-// washer routes
-router.post('/orders/:orderId/complete', washerprotect, async (req, res) => {
-  const order = await Order.findByIdAndUpdate(
-    req.params.orderId,
-    { status: 'completed' },
-    { new: true }
-  );
-  res.json({ success: true, data: order });
-});
+// Washer completes laundry processing -> sets status to 'cleaned'
+router.post('/orders/:orderId/complete', washerprotect, completeOrder);
+router.post('/orders/:id/complete', washerprotect, completeOrder);
 
 module.exports = router;
