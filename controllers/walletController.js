@@ -16,14 +16,25 @@ exports.getWallet = async (req, res) => {
       });
     }
 
-    let wallet = await Wallet.findOne({ customerId: customer._id });
-
-    if (!wallet) {
-      wallet = await Wallet.create({
-        customerId: customer._id,
-        balance: 0,
-        transactions: [],
-      });
+    let wallet;
+    try {
+      wallet = await Wallet.findOneAndUpdate(
+        { customerId: customer._id },
+        {
+          $setOnInsert: {
+            customerId: customer._id,
+            balance: 0,
+            transactions: [],
+          },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (err) {
+      if (err.code === 11000) {
+        wallet = await Wallet.findOne({ customerId: customer._id });
+      } else {
+        throw err;
+      }
     }
 
     const transactions = [...wallet.transactions]

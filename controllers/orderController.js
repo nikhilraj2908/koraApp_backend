@@ -103,6 +103,18 @@ exports.createOrder = async (req, res) => {
       });
     }
 
+    const validPaymentMethods = ["cash", "upi", "card"];
+    const normalizedPaymentMethod = paymentMethod
+      ? String(paymentMethod).toLowerCase().trim()
+      : null;
+
+    if (!normalizedPaymentMethod || !validPaymentMethods.includes(normalizedPaymentMethod)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing paymentMethod. Allowed methods: cash, upi, card",
+      });
+    }
+
     const finalItems = [];
     let subtotal = 0;
 
@@ -276,16 +288,16 @@ exports.createOrder = async (req, res) => {
       }
     }
 
-    // Frontend should send "paid".
-    // "success" is accepted temporarily for backward compatibility.
-    const normalizedPaymentStatus =
-      paymentStatus === "paid" ||
-      paymentStatus === "success"
-        ? "paid"
-        : paymentStatus ===
-          "failed"
-        ? "failed"
-        : "pending";
+    // Cash-on-Delivery orders must ALWAYS initialize as "pending".
+    // Cash is physically collected at pickup/delivery, never at booking time.
+    let normalizedPaymentStatus = "pending";
+    if (normalizedPaymentMethod !== "cash") {
+      if (paymentStatus === "paid" || paymentStatus === "success") {
+        normalizedPaymentStatus = "paid";
+      } else if (paymentStatus === "failed") {
+        normalizedPaymentStatus = "failed";
+      }
+    }
 
     const orderData = {
       customerId,
@@ -297,7 +309,7 @@ exports.createOrder = async (req, res) => {
       totalAmount,
       pickupAddress,
       deliveryAddress,
-      paymentMethod,
+      paymentMethod: normalizedPaymentMethod,
       paymentStatus:
         normalizedPaymentStatus,
       pickupScheduledAt,
@@ -472,14 +484,14 @@ exports.getOrderDetails =
           });
       }
 
-      // Optional ownership protection:
-      // customer users should not be able to access another customer's order.
-      if (
+      // Customer users should not be able to access another customer's order.
+      // Admin and subadmin staff are authorized to inspect order details.
+      const isOwner =
         order.customerId &&
-        order.customerId.toString() !==
-          req.user.id &&
-        req.user.role !== "admin"
-      ) {
+        order.customerId.toString() === req.user.id;
+      const isAdminStaff = ["admin", "subadmin"].includes(req.user.role);
+
+      if (!isOwner && !isAdminStaff) {
         return res
           .status(403)
           .json({
@@ -636,7 +648,11 @@ exports.cancelOrder = async (req, res) => {
       });
     }
 
-    const wasPaid = existingOrder.paymentStatus === "paid";
+    // A refund is only applicable if the order was genuinely paid online.
+    // Cash-on-delivery orders have not had digital funds collected and must never issue wallet credit.
+    const wasPaid =
+      existingOrder.paymentStatus === "paid" &&
+      existingOrder.paymentMethod !== "cash";
     const refundAmount = wasPaid ? existingOrder.totalAmount : 0;
     const refundMode = refundAmount > 0 ? "wallet_credit" : "none";
 
