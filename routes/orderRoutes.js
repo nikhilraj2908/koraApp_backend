@@ -12,7 +12,7 @@ const {
 } = require("../controllers/orderController");
 
 // const authMiddleware = require("../middleware/auth");
-const { protect } = require("../middleware/auth");
+const { protect, restrictTo } = require("../middleware/auth");
 const upload = require("../middleware/upload");
 
 // Create order
@@ -53,10 +53,11 @@ router.get(
   getOrderDetails
 );
 
-// Update status
+// Update status (admin / subadmin only — customers must cancel via /:id/cancel within 2 hours)
 router.put(
   "/:id/status",
   protect,
+  restrictTo("admin", "subadmin"),
   updateStatus
 );
 

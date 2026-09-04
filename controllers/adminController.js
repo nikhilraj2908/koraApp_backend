@@ -745,15 +745,9 @@ exports.cancelOrder = async (req, res) => {
   }
 };
 
-// DELETE /api/admin/orders/:id — super admin only, destructive.
+// DELETE /api/admin/orders/:id — Permanently disabled to preserve audit and financial records.
 exports.deleteOrder = async (req, res) => {
-  try {
-    const order = await Order.findByIdAndDelete(req.params.id);
-    if (!order) return fail(res, 'Order not found', 404);
-    ok(res, { message: 'Order deleted' });
-  } catch (err) {
-    fail(res, err.message);
-  }
+  return fail(res, 'Order deletion is disabled. Orders cannot be deleted to preserve audit and financial records.', 403);
 };
 
 /* =========================================================================

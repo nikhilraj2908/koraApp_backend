@@ -248,7 +248,7 @@ const OrderSchema = new mongoose.Schema({
     },
     refundStatus: {
       type: String,
-      enum: ["not_applicable", "processing", "completed"],
+      enum: ["not_applicable", "processing", "completed", "failed"],
       default: "not_applicable",
     },
   }

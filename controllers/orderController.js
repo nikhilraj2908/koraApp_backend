@@ -5,6 +5,7 @@ const Wallet = require("../models/WalletCustomer");
 
 const {
   emitNewOrderToWashers,
+  emitOrderUpdate,
 } = require("../socket/trackingSocket");
 
 const {
@@ -38,10 +39,8 @@ const formatOrderDisplayDateTime = (value) =>
 // Cancellation and refund policy
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FREE_CANCELLATION_WINDOW_MS =
-  2 * 60 * 60 * 1000;
-
-const LATE_CANCELLATION_FEE = 50;
+const MAX_CANCELLATION_WINDOW_MS =
+  2 * 60 * 60 * 1000; // Strictly 2 hours maximum cancellation window
 
 const PICKUP_STARTED_STATUSES = [
   "picked_up",
@@ -569,379 +568,254 @@ exports.updateStatus =
 // Cancel order
 // ─────────────────────────────────────────────────────────────────────────────
 
-exports.cancelOrder =
-  async (req, res) => {
+exports.cancelOrder = async (req, res) => {
+  try {
+    const existingOrder = await Order.findOne({
+      orderNumber: req.params.id,
+    });
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (existingOrder.customerId.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to cancel this order",
+      });
+    }
+
+    if (existingOrder.status === "cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: "This order has already been cancelled",
+      });
+    }
+
+    if (existingOrder.status === "delivered") {
+      return res.status(400).json({
+        success: false,
+        message: "Delivered orders cannot be cancelled",
+      });
+    }
+
+    if (PICKUP_STARTED_STATUSES.includes(existingOrder.status)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "This order is already picked up or in process. Please contact support to cancel it.",
+      });
+    }
+
+    // Stop self-cancellation once dispatch grouping has started.
+    if (
+      !ALLOW_MID_PIPELINE_CANCELLATION &&
+      existingOrder.dispatchStatus &&
+      existingOrder.dispatchStatus !== "awaiting_slot"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          existingOrder.dispatchStatus === "assigned"
+            ? "A rider has already been assigned to pick up this order. Please contact support to cancel it."
+            : "This order is currently being matched with a rider. Please contact support to cancel it.",
+      });
+    }
+
+    // Strict 2-hour cancellation policy: No cancellation allowed after 2 hours
+    const placedAt = new Date(existingOrder.createdAt).getTime();
+    const timeSincePlacement = Date.now() - placedAt;
+    if (timeSincePlacement > MAX_CANCELLATION_WINDOW_MS) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Orders cannot be cancelled after 2 hours of placement. Please contact customer support.",
+      });
+    }
+
+    const wasPaid = existingOrder.paymentStatus === "paid";
+    const refundAmount = wasPaid ? existingOrder.totalAmount : 0;
+    const refundMode = refundAmount > 0 ? "wallet_credit" : "none";
+
+    // Atomic State Transition: Guards against concurrent duplicate cancellation calls
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: existingOrder._id,
+        customerId: req.user.id,
+        status: { $ne: "cancelled" },
+      },
+      {
+        $set: {
+          status: "cancelled",
+          cancellation: {
+            cancelledAt: new Date(),
+            cancelledBy: "customer",
+            isFreeCancellation: true,
+            cancellationFee: 0,
+            refundAmount,
+            refundMode,
+            refundStatus: refundAmount > 0 ? "processing" : "not_applicable",
+          },
+        },
+        $push: {
+          statusHistory: {
+            status: "cancelled",
+            note: "Cancelled by customer within 2-hour cancellation window",
+            updatedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(400).json({
+        success: false,
+        message: "This order has already been cancelled",
+      });
+    }
+
+    // Clean up dispatch data
     try {
-      const order =
-        await Order.findOne({
-          orderNumber:
-            req.params.id,
+      await handleOrderCancellation(order);
+    } catch (dispatchError) {
+      console.error(
+        `[CancelOrder] Dispatch cleanup failed for ${order.orderNumber}. The order remains cancelled:`,
+        dispatchError
+      );
+    }
+
+    // Process wallet refund if payment was already made
+    let walletBalance = null;
+    let walletCreditFailed = false;
+
+    if (refundAmount > 0) {
+      try {
+        const customer = await Customer.findOne({
+          accountId: order.customerId,
         });
 
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found",
+        if (!customer) {
+          walletCreditFailed = true;
+          console.error(
+            `[CancelOrder] Customer profile not found for account ${order.customerId}`
+          );
+        } else {
+          // Idempotency check: Ensure wallet transaction for this order does not already exist
+          const existingTxn = await Wallet.findOne({
+            customerId: customer._id,
+            "transactions.orderId": order._id,
+            "transactions.type": "refund",
           });
-      }
 
-      if (
-        order.customerId.toString() !==
-        req.user.id
-      ) {
-        return res
-          .status(403)
-          .json({
-            success: false,
-            message:
-              "You are not authorized to cancel this order",
-          });
-      }
-
-      if (
-        order.status ===
-        "cancelled"
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "This order has already been cancelled",
-          });
-      }
-
-      if (
-        order.status ===
-        "delivered"
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Delivered orders cannot be cancelled",
-          });
-      }
-
-      if (
-        PICKUP_STARTED_STATUSES.includes(
-          order.status
-        )
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "This order is already picked up or in process. Please contact support to cancel it.",
-          });
-      }
-
-      // Stop self-cancellation once dispatch grouping has started.
-      if (
-        !ALLOW_MID_PIPELINE_CANCELLATION &&
-        order.dispatchStatus &&
-        order.dispatchStatus !==
-          "awaiting_slot"
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              order.dispatchStatus ===
-              "assigned"
-                ? "A rider has already been assigned to pick up this order. Please contact support to cancel it."
-                : "This order is currently being matched with a rider. Please contact support to cancel it.",
-          });
-      }
-
-      const placedAt =
-        new Date(
-          order.createdAt
-        ).getTime();
-
-      const withinFreeWindow =
-        Date.now() -
-          placedAt <=
-        FREE_CANCELLATION_WINDOW_MS;
-
-      const cancellationFee =
-        withinFreeWindow
-          ? 0
-          : Math.min(
-              LATE_CANCELLATION_FEE,
-              order.totalAmount
+          if (existingTxn) {
+            console.warn(
+              `[CancelOrder] Wallet refund already exists for order ${order.orderNumber}`
             );
-
-      const wasPaid =
-        order.paymentStatus ===
-        "paid";
-
-      const refundAmount =
-        wasPaid
-          ? Math.max(
-              order.totalAmount -
-                cancellationFee,
-              0
-            )
-          : 0;
-
-      const refundMode =
-        refundAmount > 0
-          ? "wallet_credit"
-          : "none";
-
-      order.status =
-        "cancelled";
-
-      order.statusHistory.push({
-        status: "cancelled",
-
-        note:
-          withinFreeWindow
-            ? "Cancelled by customer within the free-cancellation window"
-            : `Cancelled by customer after the free-cancellation window (₹${cancellationFee} fee applied)`,
-      });
-
-      order.cancellation = {
-        cancelledAt:
-          new Date(),
-
-        cancelledBy:
-          "customer",
-
-        isFreeCancellation:
-          withinFreeWindow,
-
-        cancellationFee,
-
-        refundAmount,
-
-        refundMode,
-
-        refundStatus:
-          refundAmount > 0
-            ? "completed"
-            : "not_applicable",
-      };
-
-      await order.save();
-
-      // Clean up dispatch data.
-      try {
-        await handleOrderCancellation(
-          order
-        );
-      } catch (
-        dispatchError
-      ) {
-        console.error(
-          `[CancelOrder] Dispatch cleanup failed for ${order.orderNumber}. The order remains cancelled:`,
-          dispatchError
-        );
-      }
-
-      let walletBalance =
-        null;
-
-      let walletCreditFailed =
-        false;
-
-      if (refundAmount > 0) {
-        try {
-          const customer =
-            await Customer.findOne(
+            walletBalance = existingTxn.balance;
+          } else {
+            const wallet = await Wallet.findOneAndUpdate(
               {
-                accountId:
-                  order.customerId,
+                customerId: customer._id,
+              },
+              {
+                $setOnInsert: {
+                  customerId: customer._id,
+                },
+                $inc: {
+                  balance: refundAmount,
+                },
+                $push: {
+                  transactions: {
+                    type: "refund",
+                    amount: refundAmount,
+                    reason: `Refund for cancelled order ${order.orderNumber}`,
+                    orderId: order._id,
+                    orderNumber: order.orderNumber,
+                  },
+                },
+              },
+              {
+                upsert: true,
+                new: true,
+                setDefaultsOnInsert: true,
               }
             );
 
-          if (!customer) {
-            walletCreditFailed =
-              true;
-
-            console.error(
-              `[CancelOrder] Customer profile not found for account ${order.customerId}`
-            );
-          } else {
-            const wallet =
-              await Wallet.findOneAndUpdate(
-                {
-                  customerId:
-                    customer._id,
-                },
-
-                {
-                  $setOnInsert: {
-                    customerId:
-                      customer._id,
-                  },
-
-                  $inc: {
-                    balance:
-                      refundAmount,
-                  },
-
-                  $push: {
-                    transactions: {
-                      type: "refund",
-
-                      amount:
-                        refundAmount,
-
-                      reason:
-                        withinFreeWindow
-                          ? `Refund for cancelled order ${order.orderNumber}`
-                          : `Refund for cancelled order ${order.orderNumber} after ₹${cancellationFee} cancellation fee`,
-
-                      orderId:
-                        order._id,
-
-                      orderNumber:
-                        order.orderNumber,
-                    },
-                  },
-                },
-
-                {
-                  upsert: true,
-                  new: true,
-                  setDefaultsOnInsert:
-                    true,
-                }
-              );
-
-            walletBalance =
-              wallet.balance;
+            walletBalance = wallet.balance;
           }
-        } catch (
-          walletError
-        ) {
-          console.error(
-            `[CancelOrder] Wallet credit failed for ${order.orderNumber}:`,
-            walletError
-          );
-
-          walletCreditFailed =
-            true;
         }
-      }
-
-      // Update refund status if wallet credit failed.
-      if (
-        refundAmount > 0 &&
-        walletCreditFailed
-      ) {
-        order.cancellation.refundStatus =
-          "processing";
-
-        try {
-          await order.save();
-        } catch (
-          saveError
-        ) {
-          console.error(
-            `[CancelOrder] Failed to update refund status for ${order.orderNumber}:`,
-            saveError
-          );
-        }
-      }
-
-      // Customer cancellation notification.
-      try {
-        await notifyCustomer(
-          order.customerId,
-          {
-            title:
-              "Order Cancelled",
-
-            body:
-              cancellationFee >
-              0
-                ? `Your order #${order.orderNumber} was cancelled. A ₹${cancellationFee} cancellation fee was applied.`
-                : `Your order #${order.orderNumber} was cancelled free of charge.`,
-
-            type:
-              "order_cancelled",
-
-            orderId:
-              order._id,
-
-            orderNumber:
-              order.orderNumber,
-          }
-        );
-
-        console.log(
-          `[CancelOrder] Customer notification sent for ${order.orderNumber}`
-        );
-      } catch (
-        notificationError
-      ) {
+      } catch (walletError) {
         console.error(
-          `[CancelOrder] Customer notification failed for ${order.orderNumber}:`,
-          notificationError
+          `[CancelOrder] Wallet credit failed for ${order.orderNumber}:`,
+          walletError
         );
+        walletCreditFailed = true;
       }
-
-      return res.json({
-        success: true,
-
-        message:
-          withinFreeWindow
-            ? "Order cancelled free of charge"
-            : `Order cancelled. A ₹${cancellationFee} late cancellation fee was applied`,
-
-        data: {
-          orderNumber:
-            order.orderNumber,
-
-          status:
-            order.status,
-
-          isFreeCancellation:
-            withinFreeWindow,
-
-          cancellationFee,
-
-          refundAmount,
-
-          refundMode,
-
-          refundStatus:
-            walletCreditFailed
-              ? "processing"
-              : order
-                  .cancellation
-                  .refundStatus,
-
-          walletBalance,
-
-          walletCreditFailed,
-        },
-      });
-    } catch (error) {
-      console.error(
-        "[CancelOrder] Error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            error.message,
-        });
     }
-  };
+
+    // Finalize refundStatus on order
+    const finalRefundStatus =
+      refundAmount > 0
+        ? walletCreditFailed
+          ? "failed"
+          : "completed"
+        : "not_applicable";
+
+    await Order.findByIdAndUpdate(order._id, {
+      $set: { "cancellation.refundStatus": finalRefundStatus },
+    });
+    order.cancellation.refundStatus = finalRefundStatus;
+
+    // Customer cancellation push notification
+    try {
+      await notifyCustomer(order.customerId, {
+        title: "Order Cancelled",
+        body: `Your order #${order.orderNumber} was cancelled free of charge.`,
+        type: "order_cancelled",
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+      });
+
+      console.log(
+        `[CancelOrder] Customer notification sent for ${order.orderNumber}`
+      );
+    } catch (notificationError) {
+      console.error(
+        `[CancelOrder] Customer notification failed for ${order.orderNumber}:`,
+        notificationError
+      );
+    }
+
+    // Real-time tracking socket emission
+    emitOrderUpdate(order);
+
+    return res.json({
+      success: true,
+      message: "Order cancelled free of charge",
+      data: {
+        orderNumber: order.orderNumber,
+        status: order.status,
+        isFreeCancellation: true,
+        cancellationFee: 0,
+        refundAmount,
+        refundMode,
+        refundStatus: order.cancellation.refundStatus,
+        walletBalance,
+        walletCreditFailed,
+      },
+    });
+  } catch (error) {
+    console.error("[CancelOrder] Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tracking helpers

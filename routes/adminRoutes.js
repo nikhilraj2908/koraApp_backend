@@ -60,8 +60,19 @@ router.get('/orders', requirePermission(PERMISSIONS.VIEW_ORDERS), ctrl.listOrder
 router.get('/orders/:id', requirePermission(PERMISSIONS.VIEW_ORDERS), ctrl.getOrderById);
 router.patch('/orders/:id/status', requirePermission(PERMISSIONS.MANAGE_ORDERS), ctrl.updateOrderStatus);
 router.patch('/orders/:id/assign', requirePermission(PERMISSIONS.MANAGE_ORDERS), ctrl.assignOrder);
-router.patch('/orders/:id/cancel', requirePermission(PERMISSIONS.MANAGE_ORDERS), ctrl.cancelOrder);
-router.delete('/orders/:id', superAdminOnly, ctrl.deleteOrder); // destructive — super admin only
+// Order deletion and admin cancellation permanently disabled to preserve audit and financial trail
+router.patch('/orders/:id/cancel', (req, res) => {
+  res.status(403).json({
+    success: false,
+    message: "Admin order cancellation is disabled. Orders must be cancelled by customers within the 2-hour window."
+  });
+});
+router.delete('/orders/:id', (req, res) => {
+  res.status(403).json({
+    success: false,
+    message: "Order deletion is disabled. Orders cannot be deleted to preserve audit and financial records."
+  });
+});
 
 /* ── Riders — verify/edit delegable, delete is super-admin-only ──────── */
 router.get('/riders', requirePermission(PERMISSIONS.VIEW_RIDERS), ctrl.listRiders);
