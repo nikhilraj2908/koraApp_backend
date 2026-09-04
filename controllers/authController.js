@@ -62,22 +62,46 @@ const createProfile = async (accountId, role, profileData) => {
 
 // ─── 1. REGISTER (email, mobile, password, fullName, role) ───
 exports.register = async (req, res) => {
+  let account;
   try {
     const { email, mobile, password, role, ...profileData } = req.body;
 
     if (!email || !mobile || !password || !role) {
       return res.status(400).json({ error: 'Email, mobile, password and role are required' });
     }
-    if (!profileData.fullName) {
+    if (!profileData.fullName || !profileData.fullName.trim()) {
       return res.status(400).json({ error: 'Full name is required' });
     }
 
-    const existingEmail = await Account.findOne({ email: email.toLowerCase() });
+    // 🔒 Security Guard: Admin and Subadmin accounts can NEVER be registered through public signup
+    if (role === 'admin' || role === 'subadmin') {
+      return res.status(403).json({ error: 'Admin and Subadmin accounts cannot be registered publicly' });
+    }
+
+    const ALLOWED_PUBLIC_ROLES = ['customer', 'rider', 'serviceProvider'];
+    if (!ALLOWED_PUBLIC_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role for registration' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (!normalizedEmail.includes('@') || !normalizedEmail.includes('.')) {
+      return res.status(400).json({ error: 'A valid email address is required' });
+    }
+
+    const normalizedMobile = normalizeMobile(mobile);
+    if (normalizedMobile.length !== 10) {
+      return res.status(400).json({ error: 'A valid 10-digit mobile number is required' });
+    }
+
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    }
+
+    const existingEmail = await Account.findOne({ email: normalizedEmail });
     if (existingEmail) {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    const normalizedMobile = normalizeMobile(mobile);
     const existingMobile = await Account.findOne({ mobile: normalizedMobile });
     if (existingMobile) {
       return res.status(409).json({ error: 'Mobile already registered' });
@@ -85,8 +109,8 @@ exports.register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const account = await Account.create({
-      email: email.toLowerCase(),
+    account = await Account.create({
+      email: normalizedEmail,
       mobile: normalizedMobile,
       password: hashedPassword,
       role,
@@ -116,6 +140,10 @@ exports.register = async (req, res) => {
     );
 
   } catch (err) {
+    // Rollback account creation if downstream profile or OTP setup fails
+    if (account?._id) {
+      await Account.deleteOne({ _id: account._id }).catch(() => undefined);
+    }
     console.error(err);
     res.status(500).json({ error: err.message });
   }

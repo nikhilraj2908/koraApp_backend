@@ -8,7 +8,7 @@ const {
   updateOrderStatus,
 } = require("../controllers/trackOrderController");
 
-const { protect }      = require("../middleware/auth");       
+const { protect, restrictTo } = require("../middleware/auth");       
 
 
 router.get("/active", protect, getActiveOrders);
@@ -21,6 +21,6 @@ router.get("/track/:orderNumber", protect, trackOrder);
 
 
 
-router.patch("/:id/status", protect, updateOrderStatus);
+router.patch("/:id/status", protect, restrictTo("admin", "subadmin", "rider"), updateOrderStatus);
 
 module.exports = router;

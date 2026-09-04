@@ -9,7 +9,7 @@ const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { emitOrderUpdate } = require('../socket/trackingSocket');
-const { notifyAdmins } = require('../utils/notification');
+const { notifyAdmins, notifyCustomer } = require('../utils/notification');
 router.post('/enroll', upload.fields([
   { name: 'aadhaarFront', maxCount: 1 },
   { name: 'aadhaarBack', maxCount: 1 },
@@ -67,46 +67,109 @@ router.post('/orders/:id/reject', riderProtect, (req, res) => {
   });
 });
 
+// ── Picked Up ────────────────────────────────────────────────
+// Rider confirms pickup of laundry from customer.
+// Enforces ownership (must be the assigned pickup rider) and valid state transition.
 router.post('/orders/:id/picked-up', riderProtect, async (req, res) => {
   try {
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        riderPickupId: req.rider._id,
+        status: 'rider_pickup_assigned',
+      },
       {
         $set: { status: 'picked_up', riderStatus: 'picked_up' },
-        $push: { statusHistory: { status: 'picked_up', updatedAt: new Date() } }
+        $push: {
+          statusHistory: {
+            status: 'picked_up',
+            note: `Clothes picked up by rider ${req.rider.fullName || ''}`.trim(),
+            updatedAt: new Date(),
+          },
+        },
       },
-      { new: true, populate: [{ path: 'riderPickupId', select: 'name phone' }, { path: 'riderDeliveryId', select: 'name phone' }] }
+      {
+        new: true,
+        populate: [
+          { path: 'riderPickupId', select: 'name fullName phone' },
+          { path: 'riderDeliveryId', select: 'name fullName phone' },
+        ],
+      }
     );
-    if (!order) return res.status(404).json({ message: 'Order not found' });
 
-    // ✅ Customer tracking screen update karo
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found, unauthorized (not assigned to you), or not in pickup assigned status',
+      });
+    }
+
+    notifyCustomer(order.customerId, {
+      title: 'Clothes Picked Up 🧺',
+      body: `Your clothes for order #${order.orderNumber} have been picked up and are on the way to the washer!`,
+      type: 'order_picked_up',
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
+
     emitOrderUpdate(order);
 
     res.json({ success: true, data: order });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
 // ── Delivered ────────────────────────────────────────────────
+// Rider confirms delivery of clean laundry back to customer.
+// Enforces ownership (must be the assigned delivery rider) and valid state transition.
 router.post('/orders/:id/delivered', riderProtect, async (req, res) => {
   try {
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        riderDeliveryId: req.rider._id,
+        status: 'rider_delivery_assigned',
+      },
       {
         $set: { status: 'delivered', riderStatus: 'delivered' },
-        $push: { statusHistory: { status: 'delivered', updatedAt: new Date() } }
+        $push: {
+          statusHistory: {
+            status: 'delivered',
+            note: `Clothes delivered by rider ${req.rider.fullName || ''}`.trim(),
+            updatedAt: new Date(),
+          },
+        },
       },
-      { new: true, populate: [{ path: 'riderPickupId', select: 'name phone' }, { path: 'riderDeliveryId', select: 'name phone' }] }
+      {
+        new: true,
+        populate: [
+          { path: 'riderPickupId', select: 'name fullName phone' },
+          { path: 'riderDeliveryId', select: 'name fullName phone' },
+        ],
+      }
     );
-    if (!order) return res.status(404).json({ message: 'Order not found' });
 
-    // ✅ Customer tracking screen update karo
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found, unauthorized (not assigned to you), or not in delivery assigned status',
+      });
+    }
+
+    notifyCustomer(order.customerId, {
+      title: 'Order Delivered! 🎉',
+      body: `Your order #${order.orderNumber} has been delivered. Thank you for choosing Kora!`,
+      type: 'order_delivered',
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+    });
+
     emitOrderUpdate(order);
 
     res.json({ success: true, data: order });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 // ── Register ─────────────────────────────────────────────────
