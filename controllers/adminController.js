@@ -9,7 +9,8 @@ const Washer = require('../models/Washer');
 const Order = require('../models/Order');
 const Complaint = require('../models/Complaint');
 const { ALL_PERMISSIONS } = require('../constants/permissions');
-const { emitOrderUpdate } = require('../socket/trackingSocket');
+const { emitOrderUpdate, emitVerificationStatusUpdated } = require('../socket/trackingSocket');
+const { notifyWasher, notifyRider } = require('../utils/notification');
 
 const ok = (res, data, code = 200) => res.status(code).json({ success: true, data });
 const fail = (res, message, code = 500) => res.status(code).json({ success: false, message });
@@ -852,18 +853,41 @@ exports.verifyRider = async (req, res) => {
       return fail(res, "action must be 'verify' or 'reject'", 400);
     }
 
+    const isVerified = action === 'verify';
+    const status = isVerified ? 'verified' : 'rejected';
+
     const rider = await Rider.findByIdAndUpdate(
       req.params.id,
       {
         $set: {
-          verificationStatus: action === 'verify' ? 'verified' : 'rejected',
-          isVerified: action === 'verify',
+          verificationStatus: status,
+          isVerified,
           verificationNote: reason || undefined,
         },
       },
       { new: true }
     );
     if (!rider) return fail(res, 'Rider not found', 404);
+
+    // Send push notification to rider
+    const title = isVerified ? "Account Verified! 🛵" : "Verification Update";
+    const body = isVerified
+      ? "Congratulations! Your rider account has been approved. You can now go online and accept delivery orders."
+      : `Your rider verification was not approved. ${reason ? `Reason: ${reason}` : 'Please contact support.'}`;
+
+    notifyRider(rider._id, {
+      title,
+      body,
+      data: { type: "verification_update", verificationStatus: status },
+    });
+
+    // Real-time socket event to rider's personal room
+    emitVerificationStatusUpdated("rider", rider._id, {
+      verificationStatus: status,
+      isVerified,
+      verificationNote: reason || null,
+    });
+
     ok(res, absolutizeRider(req, rider));
   } catch (err) {
     fail(res, err.message);
@@ -949,18 +973,41 @@ exports.verifyWasher = async (req, res) => {
       return fail(res, "action must be 'verify' or 'reject'", 400);
     }
 
+    const isVerified = action === 'verify';
+    const status = isVerified ? 'verified' : 'rejected';
+
     const washer = await Washer.findByIdAndUpdate(
       req.params.id,
       {
         $set: {
-          verificationStatus: action === 'verify' ? 'verified' : 'rejected',
-          isVerified: action === 'verify',
+          verificationStatus: status,
+          isVerified,
           verificationNote: reason || undefined,
         },
       },
       { new: true }
     ).select('-password');
     if (!washer) return fail(res, 'Washer not found', 404);
+
+    // Send push notification to washer
+    const title = isVerified ? "Account Verified! 🧺" : "Verification Update";
+    const body = isVerified
+      ? "Congratulations! Your washer account has been approved. You can now receive batch orders."
+      : `Your washer verification was not approved. ${reason ? `Reason: ${reason}` : 'Please contact support.'}`;
+
+    notifyWasher(washer._id, {
+      title,
+      body,
+      data: { type: "verification_update", verificationStatus: status },
+    });
+
+    // Real-time socket event to washer's personal room
+    emitVerificationStatusUpdated("washer", washer._id, {
+      verificationStatus: status,
+      isVerified,
+      verificationNote: reason || null,
+    });
+
     ok(res, absolutizeWasher(req, washer));
   } catch (err) {
     fail(res, err.message);

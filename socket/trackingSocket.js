@@ -283,8 +283,18 @@ function emitWasherGroupOfferExpired(washerId, payload) {
   io.to(`washer_${washerId}`).emit("washer_group_offer_expired", payload);
 }
 
-// initSocket ke andar, io.on("connection") mein ye add karo:
-
+/**
+ * Emits a real-time verification update to washer or rider personal room.
+ * @param {'washer'|'rider'} role
+ * @param {string|ObjectId} id
+ * @param {object} payload - { verificationStatus, isVerified, verificationNote }
+ */
+function emitVerificationStatusUpdated(role, id, payload) {
+  if (!io) return;
+  const room = role === "washer" ? `washer_${id}` : `rider_${id}`;
+  io.to(room).emit("verification_status_updated", payload);
+  console.log(`[Socket] verification_status_updated → ${room}:`, payload);
+}
 
 module.exports = {
   initSocket,
@@ -296,4 +306,5 @@ module.exports = {
   emitWasherGroupOffer,
   emitWasherGroupOfferResolved,
   emitWasherGroupOfferExpired,
+  emitVerificationStatusUpdated,
 };

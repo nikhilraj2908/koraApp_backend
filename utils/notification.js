@@ -91,6 +91,28 @@ exports.notifyWasher = async (washerId, { title, body, data = {} }) => {
   }
 };
 
+/**
+ * Sends an Expo push notification to a rider by their Rider document _id.
+ *
+ * @param {string|ObjectId} riderId - Rider._id
+ * @param {{ title: string, body: string, data?: object }} payload
+ */
+exports.notifyRider = async (riderId, { title, body, data = {} }) => {
+  try {
+    const Rider = require("../models/Rider");
+    const rider = await Rider.findById(riderId).select("expoPushToken").lean();
+    if (!rider) {
+      console.log(`notifyRider: no Rider found for id ${riderId}`);
+      return;
+    }
+    if (rider.expoPushToken) {
+      await sendPushNotification(rider.expoPushToken, { title, body, data });
+    }
+  } catch (err) {
+    console.log("notifyRider failed:", err.message);
+  }
+};
+
 
 
 // Which permission (see constants/permissions.js) a sub-admin needs before

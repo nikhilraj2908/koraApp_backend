@@ -12,10 +12,14 @@ const { WASHER_GROUP_OFFER_STATUS } = require("../constants/dispatchConstants");
 // ─────────────────────────────────────────────────────────────
 
 // GET all pending orders (washer dashboard — legacy view)
+// Orders managed by the dispatch system (awaiting_slot, grouped, offer_pending) are excluded
+// because they must be accepted as optimized groups via WasherGroupOffer.
 exports.getPendingOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ status: "pending_sp" })
-      .sort({ createdAt: -1 });
+    const orders = await Order.find({
+      status: "pending_sp",
+      dispatchStatus: { $nin: ["awaiting_slot", "grouped", "offer_pending"] },
+    }).sort({ createdAt: -1 });
     res.json({ success: true, data: orders });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -35,13 +39,16 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
-// POST accept individual order (legacy — still works but new orders go through group offers)
+// POST accept individual order (legacy — blocked if order is awaiting slot dispatch)
 exports.acceptOrder = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-    if (order.status !== "pending_sp") {
-      return res.status(400).json({ success: false, message: "Order already taken" });
+    if (order.status !== "pending_sp" || order.dispatchStatus === "awaiting_slot") {
+      return res.status(400).json({
+        success: false,
+        message: "This order is managed by slot dispatch and will be bundled into a group offer.",
+      });
     }
 
     order.status = "sp_accepted";
@@ -298,10 +305,13 @@ exports.rejectGroupOffer = async (req, res) => {
  */
 exports.updateWasherLocation = async (req, res) => {
   try {
-    const { lng, lat } = req.body;
+    const rawLng = req.body.lng !== undefined ? req.body.lng : req.body.longitude;
+    const rawLat = req.body.lat !== undefined ? req.body.lat : req.body.latitude;
+    const lng = Number(rawLng);
+    const lat = Number(rawLat);
 
-    if (typeof lng !== "number" || typeof lat !== "number") {
-      return res.status(400).json({ success: false, message: "Body must include numeric lng and lat" });
+    if (Number.isNaN(lng) || Number.isNaN(lat)) {
+      return res.status(400).json({ success: false, message: "Body must include numeric lng/lat or longitude/latitude" });
     }
     if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
       return res.status(400).json({ success: false, message: "Invalid coordinates" });
