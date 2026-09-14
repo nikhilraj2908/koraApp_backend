@@ -9,6 +9,23 @@ const WasherSchema = new mongoose.Schema({
     gender: { type: String, enum: ["Male", "Female", "Other"], required: true },
     password: { type: String, required: true },
     shopAddress: { type: String, required: true, trim: true },
+
+    // GPS coordinates of the washer's shop — set once during registration
+    // or profile update via PATCH /api/washer/auth/location. Used by the
+    // dispatch system's $near query (washerRepository.js) to find the
+    // closest available washer for each order group.
+    shopLocation: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [lng, lat]
+        default: undefined, // no default — null until explicitly set
+      },
+    },
+
     shopPhoto: { type: String, required: true },
     services: [{ type: String, enum: ["Handwash", "Machine Wash", "Steam Iron", "Coal Iron"] }],
     experience: { type: Number, min: 0, default: 0 },
@@ -21,6 +38,9 @@ const WasherSchema = new mongoose.Schema({
     isAvailable: { type: Boolean, default: true },
     isVerified: { type: Boolean, default: false },
 }, { timestamps: true });
+
+// Required for $near/$geoNear nearby-washer discovery queries.
+WasherSchema.index({ shopLocation: "2dsphere" });
 
 WasherSchema.pre("save", async function () {
     if (!this.isModified("password")) return;

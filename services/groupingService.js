@@ -37,8 +37,8 @@ const orderRepository = require("../repositories/orderRepository");
 const rideGroupRepository = require("../repositories/ridegroupRepository");
 const Order = require("../models/Order");
 const { optimizeRoute } = require("./routeOptimizationService");
-const { createOfferForGroup } = require("./auctionService");
-const { RIDE_GROUP_STATUS } = require("../constants/dispatchConstants");
+const { createWasherOffer } = require("./washerAuctionService");
+const { RIDE_GROUP_STATUS, ORDER_DISPATCH_STATUS } = require("../constants/dispatchConstants");
 
 function computeCentroid(orders) {
   const n = orders.length;
@@ -219,19 +219,29 @@ async function runGroupingForSlot(pickupSlot, pickupDate) {
 
       await orderRepository.assignOrdersToGroup(orderIds, rideGroup._id);
 
-      // A group cannot be shown to riders until its pickup sequence and
-      // route metrics are known. Keep this hand-off here, immediately after
-      // grouping, so both the scheduled and manual dispatch paths follow the
-      // same complete pipeline: group -> route -> offer -> notify riders.
+      // Route optimization runs immediately after grouping — the washer
+      // needs the sequence/distance/duration for display in their app, and
+      // the rider will inherit the same optimized route later.
       const optimizedRoute = await optimizeRoute(clusterOrders);
       rideGroup.optimizedRoute = optimizedRoute;
       rideGroup.status = RIDE_GROUP_STATUS.ROUTED;
       await rideGroup.save();
 
-      // This finds nearby online/available riders and broadcasts the offer.
-      // A null result means there are no eligible riders right now; the group
-      // deliberately stays ROUTED for a later retry rather than being lost.
-      await createOfferForGroup(rideGroup._id);
+      // Update orders to "grouped" status so customers see "Finding Washer"
+      await Order.updateMany(
+        { _id: { $in: orderIds } },
+        {
+          $set: { status: "grouped", dispatchStatus: ORDER_DISPATCH_STATUS.GROUPED },
+          $push: { statusHistory: { status: "grouped", timestamp: new Date() } },
+        }
+      );
+
+      // NEW PIPELINE STEP: broadcast to nearby washers instead of directly
+      // creating a rider offer. The rider offer is triggered automatically
+      // by washerAuctionService.acceptWasherOffer() when a washer accepts.
+      // A null result means no eligible washers found; the group stays ROUTED
+      // for a later retry by the reconciliation cron.
+      await createWasherOffer(rideGroup._id);
       createdGroups.push(rideGroup);
     } catch (err) {
       // Don't let one bad cluster (e.g. a DB hiccup) take down every

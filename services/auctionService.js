@@ -103,10 +103,15 @@ async function createOfferForGroup(rideGroupId) {
     return null;
   }
 
-  const centroid = [
+  let centroid = [
     validPoints.reduce((sum, [lng]) => sum + lng, 0) / validPoints.length,
     validPoints.reduce((sum, [, lat]) => sum + lat, 0) / validPoints.length,
   ];
+
+  // Defensive check: If centroid was inverted as [lat, lng] (e.g. India lat <= 40, lng >= 60), swap to [lng, lat]
+  if (centroid[0] <= 40 && centroid[1] >= 60) {
+    centroid = [centroid[1], centroid[0]];
+  }
 
   const nearbyRiders = await findNearbyAvailableRiders(centroid, config.riderDiscovery.radiusKm);
 
@@ -310,7 +315,7 @@ async function acceptOffer(rideOfferId, riderId) {
         },
       },
     ],
-    { new: true }
+    { returnDocument: "after", updatePipeline: true }
   );
 
   if (!wonOffer) {

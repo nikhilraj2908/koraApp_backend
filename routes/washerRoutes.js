@@ -20,6 +20,10 @@ const {
   rejectOrder,
   updateOrderStatus,
   completeOrder,
+  getPendingGroupOffers,
+  acceptGroupOffer,
+  rejectGroupOffer,
+  updateWasherLocation,
 } = require("../controllers/washerOrderController");
 const { emitOrderUpdate } = require("../socket/trackingSocket");
 
@@ -33,6 +37,7 @@ router.post("/auth/register", authLimiter, upload.fields([
 router.post("/auth/login", authLimiter, login);
 router.get("/auth/me", washerprotect, getMe);
 router.patch("/auth/push-token", washerprotect, savePushToken);
+router.patch("/auth/location", washerprotect, updateWasherLocation);
 
 // Order routes
 router.get("/orders/pending", washerprotect, getPendingOrders);
@@ -97,5 +102,11 @@ router.post('/orders/:orderId/request-pickup-rider', washerprotect, async (req, 
 // Washer completes laundry processing -> sets status to 'cleaned'
 router.post('/orders/:orderId/complete', washerprotect, completeOrder);
 router.post('/orders/:id/complete', washerprotect, completeOrder);
+
+// ── NEW: Group Offer Routes ───────────────────────────────────────────
+// These are the primary acceptance path for the grouped dispatch pipeline.
+router.get("/group-offers/pending", washerprotect, getPendingGroupOffers);
+router.post("/group-offers/:offerId/accept", washerprotect, acceptGroupOffer);
+router.post("/group-offers/:offerId/reject", washerprotect, rejectGroupOffer);
 
 module.exports = router;

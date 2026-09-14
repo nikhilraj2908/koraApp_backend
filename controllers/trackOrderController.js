@@ -5,10 +5,14 @@ const { notifyCustomer } = require("../utils/notification");
 
 const STATUS_LABEL = {
   pending_sp:               "Order Placed",
+  grouped:                  "Finding Washer",
+  washer_offer_pending:     "Finding Washer",
+  washer_assigned:          "Washer Assigned",
   sp_assigned:              "SP Assigned",
   sp_accepted:              "SP Accepted",
   rider_pickup_assigned:    "Rider Assigned for Pickup",
   picked_up:                "Order Picked Up",
+  delivered_to_washer:      "Delivered to Washer",
   at_sp:                    "At Service Provider",
   cleaned:                  "Cleaned",
   rider_delivery_assigned:  "Out for Delivery",
@@ -19,10 +23,14 @@ const STATUS_LABEL = {
 
 const STATUS_ICON = {
   pending_sp:               "package-variant-closed",
+  grouped:                  "account-search",
+  washer_offer_pending:     "account-search",
+  washer_assigned:          "store-check-outline",
   sp_assigned:              "account-check-outline",
   sp_accepted:              "handshake-outline",
   rider_pickup_assigned:    "motorbike",
   picked_up:                "package-variant",
+  delivered_to_washer:      "store-plus",
   at_sp:                    "store-outline",
   cleaned:                  "tshirt-crew",
   rider_delivery_assigned:  "truck-delivery",
@@ -35,6 +43,11 @@ const STATUS_ICON = {
 // handled by orderController.cancelOrder's own policy-aware notification)
 // simply don't trigger a push from this generic status-update endpoint.
 const STATUS_NOTIFICATION = {
+  washer_assigned: {
+    type: "washer_assigned",
+    title: "Washer Assigned 🧺",
+    body: (order) => `A washer has been assigned to your order ${order.orderNumber}.`,
+  },
   sp_accepted: {
     type: "order_accepted",
     title: "Order Accepted! 🎉",
@@ -44,6 +57,11 @@ const STATUS_NOTIFICATION = {
     type: "order_picked_up",
     title: "Order Picked Up",
     body: (order) => `Your order ${order.orderNumber} has been picked up.`,
+  },
+  delivered_to_washer: {
+    type: "order_delivered_to_washer",
+    title: "Arrived at Washer 🏠",
+    body: (order) => `Your order ${order.orderNumber} has been delivered to the washer.`,
   },
   at_sp: {
     type: "order_at_sp",
@@ -70,10 +88,12 @@ const STATUS_NOTIFICATION = {
 /** Full ordered list of statuses (excluding cancelled — handled separately). */
 const STATUS_SEQUENCE = [
   "pending_sp",
-  "sp_assigned",
-  "sp_accepted",
+  "grouped",
+  "washer_offer_pending",
+  "washer_assigned",
   "rider_pickup_assigned",
   "picked_up",
+  "delivered_to_washer",
   "at_sp",
   "cleaned",
   "rider_delivery_assigned",
@@ -163,8 +183,25 @@ const formatOrderForApp = (order) => {
     };
   }
 
+  const formatRiderDoc = (doc) => {
+    if (!doc || (!doc.fullName && !doc.name)) return null;
+    return {
+      _id: doc._id,
+      name: doc.fullName || doc.name,
+      phone: doc.accountId?.mobile || doc.phone || null,
+      vehicleType: doc.vehicleType || null,
+      vehicleRegNo: doc.vehicleRegNo || null,
+      currentLocation: doc.currentLocation || null,
+    };
+  };
+
+  const pickupRiderDoc = order.riderPickupId || order.pickupRider;
+  const deliveryRiderDoc = order.riderDeliveryId || order.deliveryRider;
+
   return {
     id:          order.orderNumber,
+    orderNumber: order.orderNumber,
+    createdAt:   order.createdAt,
     service:     order.items[0]?.serviceName || "Laundry",
     items:       order.items.reduce((sum, i) => sum + i.quantity, 0),
     date:        new Date(order.createdAt).toLocaleDateString("en-IN", {
@@ -179,6 +216,8 @@ const formatOrderForApp = (order) => {
     pickupAddress: order.pickupAddress,
     deliveryAddress: order.deliveryAddress,
     rider: formattedRider,
+    riderPickup: formatRiderDoc(pickupRiderDoc),
+    riderDelivery: formatRiderDoc(deliveryRiderDoc),
     estimatedDelivery: order.estimatedDelivery || order.estimatedDeliveryTime || null,
     trackingSteps: buildTrackingSteps(order),
   };

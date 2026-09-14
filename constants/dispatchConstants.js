@@ -29,6 +29,16 @@ const DEFAULT_CONFIG = {
     clusterRadiusKm: 3,
   },
 
+  washerDiscovery: {
+    // Radius used when searching for nearby available/verified washers, in km.
+    radiusKm: 10,
+  },
+
+  washerAuction: {
+    // Seconds washers have to accept a group offer before it expires.
+    responseWindowSeconds: 120,
+  },
+
   riderDiscovery: {
     // Radius used when searching for nearby available riders, in km.
     radiusKm: 5,
@@ -68,14 +78,24 @@ const DEFAULT_CONFIG = {
   },
 };
 
+// ── Washer group offer status ────────────────────────────────────
+const WASHER_GROUP_OFFER_STATUS = {
+  PENDING: "pending",       // actively broadcasting to nearby washers
+  ACCEPTED: "accepted",     // a washer claimed this group
+  EXPIRED: "expired",       // nobody accepted before responseWindowSeconds elapsed
+  CANCELLED: "cancelled",   // all orders in group were cancelled
+};
+
 // ── Ride offer / assignment status enums ───────────────────────
 const RIDE_GROUP_STATUS = {
-  FORMING: "forming",     // being built by the grouping job
-  ROUTED: "routed",       // route optimization complete, ready for offer
-  OFFERED: "offered",     // a RideOffer has been created for this group
-  ASSIGNED: "assigned",   // a rider has accepted
-  EXPIRED: "expired",     // no rider accepted before max payout / retries exhausted
-  CANCELLED: "cancelled", // all orders in the group were cancelled
+  FORMING: "forming",                           // being built by the grouping job
+  ROUTED: "routed",                             // route optimization complete, ready for washer offer
+  WASHER_OFFER_PENDING: "washer_offer_pending", // WasherGroupOffer created, awaiting washer
+  WASHER_ASSIGNED: "washer_assigned",           // a washer accepted; rider dispatch starting
+  OFFERED: "offered",                           // a RideOffer has been created for this group
+  ASSIGNED: "assigned",                         // a rider has accepted
+  EXPIRED: "expired",                           // no rider accepted before max payout / retries exhausted
+  CANCELLED: "cancelled",                       // all orders in the group were cancelled
 };
 
 const RIDE_OFFER_STATUS = {
@@ -95,11 +115,13 @@ const ASSIGNMENT_STATUS = {
 // (which drives customer-facing tracking). This tracks this order's
 // position in the slot/grouping/auction pipeline specifically.
 const ORDER_DISPATCH_STATUS = {
-  AWAITING_SLOT: "awaiting_slot",   // booked, waiting for its pickup slot to start
-  GROUPING: "grouping",             // slot has started, being processed by the scheduler
-  GROUPED: "grouped",               // placed into a RideGroup
-  OFFER_PENDING: "offer_pending",   // RideGroup's offer is live/auctioning
-  ASSIGNED: "assigned",             // a rider accepted the group containing this order
+  AWAITING_SLOT: "awaiting_slot",               // booked, waiting for its pickup slot to start
+  GROUPING: "grouping",                         // slot has started, being processed by the scheduler
+  GROUPED: "grouped",                           // placed into a RideGroup
+  WASHER_OFFER_PENDING: "washer_offer_pending", // WasherGroupOffer is live
+  WASHER_ASSIGNED: "washer_assigned",           // a washer accepted the group
+  OFFER_PENDING: "offer_pending",               // RideGroup's rider offer is live/auctioning
+  ASSIGNED: "assigned",                         // a rider accepted the group containing this order
   CANCELLED: "cancelled",
 };
 
@@ -133,6 +155,7 @@ module.exports = {
   ALLOW_MID_PIPELINE_CANCELLATION,
   PICKUP_SLOTS,
   DEFAULT_CONFIG,
+  WASHER_GROUP_OFFER_STATUS,
   RIDE_GROUP_STATUS,
   RIDE_OFFER_STATUS,
   ASSIGNMENT_STATUS,

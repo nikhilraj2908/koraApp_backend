@@ -26,8 +26,11 @@ const NotificationSchema = new mongoose.Schema(
       type: String,
       enum: [
         "order_placed",
+        "order_grouped",
+        "washer_assigned",
         "order_accepted",
         "order_picked_up",
+        "order_delivered_to_washer",
         "order_at_sp",
         "order_cleaned",
         "order_out_for_delivery",

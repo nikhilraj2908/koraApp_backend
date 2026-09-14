@@ -66,6 +66,33 @@ exports.notifyCustomer = async (accountId, { title, body, type = "general", orde
   }
 };
 
+/**
+ * Sends an Expo push notification to a washer by their Washer document _id.
+ * Does NOT save an in-app Notification record (washer has no Notification
+ * collection row — this is push-only for in-app alerts like group offers).
+ *
+ * @param {string|ObjectId} washerId - Washer._id
+ * @param {{ title: string, body: string, data?: object }} payload
+ */
+exports.notifyWasher = async (washerId, { title, body, data = {} }) => {
+  try {
+    const Washer = require("../models/Washer");
+    const washer = await Washer.findById(washerId).select("expoPushToken").lean();
+    if (!washer) {
+      console.log(`notifyWasher: no Washer found for id ${washerId}`);
+      return;
+    }
+    if (washer.expoPushToken) {
+      await sendPushNotification(washer.expoPushToken, { title, body, data });
+    }
+  } catch (err) {
+    // Never let a notification failure break the dispatch pipeline.
+    console.log("notifyWasher failed:", err.message);
+  }
+};
+
+
+
 // Which permission (see constants/permissions.js) a sub-admin needs before
 // they're bothered with a given admin-facing notification type. The super
 // admin always gets every notification regardless of this map.

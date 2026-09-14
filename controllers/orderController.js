@@ -5,7 +5,6 @@ const Customer = require("../models/Customer");
 const Wallet = require("../models/WalletCustomer");
 
 const {
-  emitNewOrderToWashers,
   emitOrderUpdate,
 } = require("../socket/trackingSocket");
 
@@ -195,26 +194,68 @@ exports.createOrder = async (req, res) => {
         0
       );
 
-    const coordinates =
-      pickupAddress?.coordinates;
+    // Helper to ensure GeoJSON [longitude, latitude] standard
+    let normalizedCoordinates = null;
+    const rawCoords = pickupAddress?.coordinates;
+    if (
+      Array.isArray(rawCoords) &&
+      rawCoords.length === 2 &&
+      rawCoords.every((c) => typeof c === "number" && Number.isFinite(c))
+    ) {
+      const [c0, c1] = rawCoords;
+      // In India (or global GPS), if first is lat (8-40) and second is lng (60-98), swap to [lng, lat]
+      if (c0 >= -90 && c0 <= 90 && c1 >= -180 && c1 <= 180) {
+        if (c0 <= 40 && c1 >= 60) {
+          normalizedCoordinates = [c1, c0];
+        } else {
+          normalizedCoordinates = [c0, c1];
+        }
+      }
+    } else if (rawCoords && typeof rawCoords === "object") {
+      const lat = typeof rawCoords.lat === "number" ? rawCoords.lat : rawCoords.latitude;
+      const lng = typeof rawCoords.lng === "number" ? rawCoords.lng : rawCoords.longitude;
+      if (typeof lat === "number" && typeof lng === "number" && Number.isFinite(lat) && Number.isFinite(lng)) {
+        normalizedCoordinates = [lng, lat];
+      }
+    }
 
-    const hasValidCoordinates =
-      Array.isArray(coordinates) &&
-      coordinates.length === 2 &&
-      coordinates.every(
-        (coordinate) =>
-          typeof coordinate ===
-            "number" &&
-          Number.isFinite(coordinate)
-      );
+    let pickupLocation = normalizedCoordinates
+      ? {
+          type: "Point",
+          coordinates: normalizedCoordinates,
+        }
+      : undefined;
 
-    const pickupLocation =
-      hasValidCoordinates
-        ? {
-            type: "Point",
-            coordinates,
+    if (pickupAddress && normalizedCoordinates) {
+      pickupAddress.coordinates = normalizedCoordinates;
+    }
+
+    if (!pickupLocation && customerId) {
+      try {
+        const SavedAddress = require("../models/SavedAddress");
+        const defaultSaved = await SavedAddress.findOne({
+          userId: customerId,
+          "coordinates.lat": { $exists: true },
+        }).sort({ isDefault: -1, createdAt: -1 });
+        if (defaultSaved && defaultSaved.coordinates) {
+          const lat = defaultSaved.coordinates.lat;
+          const lng = defaultSaved.coordinates.lng;
+          if (typeof lat === "number" && typeof lng === "number") {
+            const fallbackCoords = [lng, lat];
+            pickupLocation = {
+              type: "Point",
+              coordinates: fallbackCoords,
+            };
+            if (pickupAddress) {
+              pickupAddress.coordinates = fallbackCoords;
+              if (!pickupAddress.address) pickupAddress.address = defaultSaved.address;
+            }
           }
-        : undefined;
+        }
+      } catch (err) {
+        console.error("[Dispatch] Fallback address lookup error:", err);
+      }
+    }
 
     if (!pickupLocation) {
       console.error(
@@ -361,15 +402,12 @@ exports.createOrder = async (req, res) => {
       `[CreateOrder] Order created: ${order.orderNumber}`
     );
 
-    // Notify washers/service providers.
-    try {
-      emitNewOrderToWashers(order);
-    } catch (socketError) {
-      console.error(
-        `[CreateOrder] Washer socket notification failed for ${order.orderNumber}:`,
-        socketError
-      );
-    }
+    // NOTE: Individual orders are NO LONGER immediately broadcast to washers.
+    // Orders now enter the slot grouping queue (dispatchStatus: awaiting_slot)
+    // and are collected with other orders in the same slot window. At slot
+    // start time, the cron groups them geographically, optimizes the route,
+    // and broadcasts a WasherGroupOffer to nearby verified washers atomically.
+    // See: services/groupingService.js → services/washerAuctionService.js
 
     // Create in-app history and send push notification to customer.
     try {

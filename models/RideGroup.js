@@ -2,9 +2,13 @@ const mongoose = require("mongoose");
 const { RIDE_GROUP_STATUS } = require("../constants/dispatchConstants");
 
 /**
- * A RideGroup is a cluster of 2-3 geographically-nearby pending orders,
- * created by the grouping job when a pickup slot starts. Once route
- * optimization completes, exactly one RideOffer is created from it.
+ * A RideGroup is a cluster of 1-3 geographically-nearby pending orders,
+ * created by the grouping job when a pickup slot starts. The pipeline is:
+ *   1. groupingService clusters orders → RideGroup (FORMING → ROUTED)
+ *   2. washerAuctionService broadcasts a WasherGroupOffer (WASHER_OFFER_PENDING)
+ *   3. A washer accepts → RideGroup gets assignedWasherId (WASHER_ASSIGNED)
+ *   4. auctionService broadcasts a RideOffer to nearby riders (OFFERED)
+ *   5. A rider accepts → RideGroup gets assignedRiderId (ASSIGNED)
  */
 const RideGroupSchema = new mongoose.Schema(
   {
@@ -28,9 +32,9 @@ const RideGroupSchema = new mongoose.Schema(
       required: true,
     }],
 
-    // Populated once route optimization (Phase 3) runs — the same
-    // orderIds, but sequenced for the shortest pickup route, plus the
-    // route metrics used to build the ride offer.
+    // Populated once route optimization runs — the same orderIds, but
+    // sequenced for the shortest pickup route, plus the route metrics
+    // used to build the washer offer and later the ride offer.
     optimizedRoute: {
       sequence: [{
         type: mongoose.Schema.Types.ObjectId,
@@ -59,6 +63,22 @@ const RideGroupSchema = new mongoose.Schema(
       default: RIDE_GROUP_STATUS.FORMING,
     },
 
+    // ── Washer assignment ──
+    // Set once a washer accepts the WasherGroupOffer for this group.
+    assignedWasherId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Washer",
+      default: null,
+    },
+
+    // Reference to the WasherGroupOffer document for this group.
+    washerGroupOfferId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WasherGroupOffer",
+      default: null,
+    },
+
+    // ── Rider assignment ──
     // Set once an Assignment is made — denormalized here too for fast
     // "is this group taken?" checks without a join.
     assignedRiderId: {

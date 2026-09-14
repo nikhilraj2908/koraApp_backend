@@ -208,9 +208,17 @@ exports.getProfile = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Rider not found' });
     }
 
+    const riderObj = rider.toObject ? rider.toObject() : rider;
+    const formattedData = {
+      ...riderObj,
+      name: riderObj.fullName || riderObj.name || '',
+      mobile: riderObj.accountId?.mobile || riderObj.mobile || '',
+      email: riderObj.accountId?.email || riderObj.email || '',
+    };
+
     return res.json({
       success: true,
-      data: rider,
+      data: formattedData,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

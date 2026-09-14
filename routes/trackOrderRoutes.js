@@ -17,6 +17,8 @@ router.get("/active", protect, getActiveOrders);
 router.get("/history", protect, getOrderHistory);
 
 
+// Support both /api/track/:orderNumber and /api/track/track/:orderNumber
+router.get("/:orderNumber", protect, trackOrder);
 router.get("/track/:orderNumber", protect, trackOrder);
 
 

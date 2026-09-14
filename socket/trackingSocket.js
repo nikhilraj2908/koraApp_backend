@@ -128,14 +128,15 @@ function emitNewOrderToWashers(order) {
 function buildOrderPayload(order) {
   return {
     orderNumber: order.orderNumber,
+    createdAt: order.createdAt,
     status: order.status,
     statusLabel: STATUS_LABEL[order.status] ?? order.status,
     trackingSteps: buildTrackingSteps(order),
     riderPickup: order.riderPickupId
-      ? { _id: order.riderPickupId._id, name: order.riderPickupId.name, phone: order.riderPickupId.phone }
+      ? { _id: order.riderPickupId._id, name: order.riderPickupId.fullName || order.riderPickupId.name, phone: order.riderPickupId.phone }
       : null,
     riderDelivery: order.riderDeliveryId
-      ? { _id: order.riderDeliveryId._id, name: order.riderDeliveryId.name, phone: order.riderDeliveryId.phone }
+      ? { _id: order.riderDeliveryId._id, name: order.riderDeliveryId.fullName || order.riderDeliveryId.name, phone: order.riderDeliveryId.phone }
       : null,
     estimatedDelivery: order.estimatedDelivery ?? null,
     deliveryAddress: order.deliveryAddress,
@@ -144,34 +145,43 @@ function buildOrderPayload(order) {
 
 /* ── Status meta (mirrors trackOrderController) ── */
 const STATUS_LABEL = {
-  pending_sp: "Order Placed",
-  sp_assigned: "SP Assigned",
-  sp_accepted: "SP Accepted",
-  rider_pickup_assigned: "Rider Assigned for Pickup",
-  picked_up: "Order Picked Up",
-  at_sp: "At Service Provider",
-  cleaned: "Cleaned",
-  rider_delivery_assigned: "Out for Delivery",
-  delivered: "Delivered",
-  cancelled: "Cancelled",
+  pending_sp:               "Order Placed",
+  grouped:                  "Finding Washer",
+  washer_offer_pending:     "Finding Washer",
+  washer_assigned:          "Washer Assigned",
+  sp_assigned:              "SP Assigned",
+  sp_accepted:              "SP Accepted",
+  rider_pickup_assigned:    "Rider Assigned for Pickup",
+  picked_up:                "Order Picked Up",
+  delivered_to_washer:      "Delivered to Washer",
+  at_sp:                    "At Service Provider",
+  cleaned:                  "Cleaned",
+  rider_delivery_assigned:  "Out for Delivery",
+  delivered:                "Delivered",
+  cancelled:                "Cancelled",
 };
 
 const STATUS_ICON = {
-  pending_sp: "package-variant-closed",
-  sp_assigned: "account-check-outline",
-  sp_accepted: "handshake-outline",
-  rider_pickup_assigned: "motorbike",
-  picked_up: "package-variant",
-  at_sp: "store-outline",
-  cleaned: "tshirt-crew",
-  rider_delivery_assigned: "truck-delivery",
-  delivered: "check-circle-outline",
-  cancelled: "close-circle-outline",
+  pending_sp:               "package-variant-closed",
+  grouped:                  "account-search",
+  washer_offer_pending:     "account-search",
+  washer_assigned:          "store-check-outline",
+  sp_assigned:              "account-check-outline",
+  sp_accepted:              "handshake-outline",
+  rider_pickup_assigned:    "motorbike",
+  picked_up:                "package-variant",
+  delivered_to_washer:      "store-plus",
+  at_sp:                    "store-outline",
+  cleaned:                  "tshirt-crew",
+  rider_delivery_assigned:  "truck-delivery",
+  delivered:                "check-circle-outline",
+  cancelled:                "close-circle-outline",
 };
 
 const STATUS_SEQUENCE = [
-  "pending_sp", "sp_assigned", "sp_accepted", "rider_pickup_assigned",
-  "picked_up", "at_sp", "cleaned", "rider_delivery_assigned", "delivered",
+  "pending_sp", "grouped", "washer_offer_pending", "washer_assigned",
+  "rider_pickup_assigned", "picked_up", "delivered_to_washer",
+  "at_sp", "cleaned", "rider_delivery_assigned", "delivered",
 ];
 function emitPickupRiderNeeded(order) {
   if (!io) return;
@@ -243,7 +253,47 @@ function emitAdminNotification(accountId, notification) {
     console.log('[Socket] emitAdminNotification failed:', err.message);
   }
 }
+
+// ── Washer Group Offer socket helpers ──────────────────────────
+
+/**
+ * Emit a new group offer to a specific washer's personal room.
+ * washerId → room name: washer_<washerId>
+ */
+function emitWasherGroupOffer(washerId, offerPayload) {
+  if (!io) return;
+  io.to(`washer_${washerId}`).emit("washer_group_offer_created", offerPayload);
+  console.log(`[Socket] washer_group_offer_created → washer_${washerId}`);
+}
+
+/**
+ * Broadcast that a washer group offer has been accepted (stop ringing).
+ * Sends to the specific washer's personal room.
+ */
+function emitWasherGroupOfferResolved(washerId, payload) {
+  if (!io) return;
+  io.to(`washer_${washerId}`).emit("washer_group_offer_resolved", payload);
+}
+
+/**
+ * Broadcast that a washer group offer has expired with no acceptance.
+ */
+function emitWasherGroupOfferExpired(washerId, payload) {
+  if (!io) return;
+  io.to(`washer_${washerId}`).emit("washer_group_offer_expired", payload);
+}
+
 // initSocket ke andar, io.on("connection") mein ye add karo:
 
 
-module.exports = { initSocket, emitOrderUpdate, emitNewOrderToWashers, getIO, emitPickupRiderNeeded, emitAdminNotification };
+module.exports = {
+  initSocket,
+  emitOrderUpdate,
+  emitNewOrderToWashers,
+  getIO,
+  emitPickupRiderNeeded,
+  emitAdminNotification,
+  emitWasherGroupOffer,
+  emitWasherGroupOfferResolved,
+  emitWasherGroupOfferExpired,
+};

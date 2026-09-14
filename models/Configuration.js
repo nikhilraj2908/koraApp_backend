@@ -32,6 +32,14 @@ const ConfigurationSchema = new mongoose.Schema(
       clusterRadiusKm: { type: Number, required: true, min: 0.1 },
     },
 
+    washerDiscovery: {
+      radiusKm: { type: Number, default: 10, min: 0.1 },
+    },
+
+    washerAuction: {
+      responseWindowSeconds: { type: Number, default: 120, min: 10 },
+    },
+
     riderDiscovery: {
       radiusKm: { type: Number, required: true, min: 0.1 },
     },
