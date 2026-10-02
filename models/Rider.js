@@ -46,8 +46,8 @@ const RiderSchema = new mongoose.Schema({
   // Rider has the app open and toggled "online" — a prerequisite for
   // receiving ride offers, separate from isAvailable (online but
   // mid-delivery = not available for a NEW offer).
-  isOnline: { type: Boolean, default: true },
-  isAvailable: { type: Boolean, default: true },
+  isOnline: { type: Boolean, default: false },
+  isAvailable: { type: Boolean, default: false },
 
   createdAt: { type: Date, default: Date.now }
 });

@@ -15,6 +15,7 @@ exports.getMyOffers = async (req, res) => {
     const offers = await RideOffer.find({
       notifiedRiderIds: riderId,
       status: RIDE_OFFER_STATUS.PENDING,
+      expiresAt: { $gt: new Date() }, // <-- Ensure overdue/expired offers are never returned
     }).sort({ createdAt: -1 });
 
     res.json({ success: true, data: offers });

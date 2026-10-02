@@ -8,11 +8,23 @@ dayjs.extend(timezone);
 const { getConfig } = require('../repositories/configRepository');
 const { runGroupingForSlot } = require('../services/groupingService');
 const RideGroup = require('../models/RideGroup');
-const { RIDE_GROUP_STATUS } = require('../constants/dispatchConstants');
+const RideOffer = require('../models/RideOffer');
+const { RIDE_GROUP_STATUS, RIDE_OFFER_STATUS } = require('../constants/dispatchConstants');
 
 let started = false;
 
 async function runScheduledDispatch() {
+  // Automatically mark any pending offers whose expiresAt has passed as 'expired'
+  await RideOffer.updateMany(
+    {
+      status: RIDE_OFFER_STATUS.PENDING,
+      expiresAt: { $lt: new Date() },
+    },
+    {
+      $set: { status: RIDE_OFFER_STATUS.EXPIRED },
+    }
+  );
+
   const config = await getConfig();
   const now = dayjs().tz(config.timezone);
   const currentTime = now.format('HH:mm');
