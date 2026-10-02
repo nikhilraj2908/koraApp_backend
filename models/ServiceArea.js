@@ -39,7 +39,6 @@ const ServiceAreaSchema = new mongoose.Schema(
       type: String,
       enum: ['active', 'inactive'],
       default: 'inactive',
-      index: true,
     },
     // Staged boundary for preview/replacement verification before committing
     stagedBoundary: {
