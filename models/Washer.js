@@ -28,6 +28,7 @@ const WasherSchema = new mongoose.Schema({
 
     shopPhoto: { type: String, required: true },
     services: [{ type: String, enum: ["Handwash", "Machine Wash", "Steam Iron", "Coal Iron"] }],
+    machineCapacity: { type: String, default: '' }, // sent only when "Machine Wash" is in services
     experience: { type: Number, min: 0, default: 0 },
     aadhaarFront: { type: String, required: true },
     aadhaarBack: { type: String, required: true },

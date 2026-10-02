@@ -12,7 +12,6 @@ const RiderSchema = new mongoose.Schema({
     coordinates: { type: [Number], default: undefined },  // no default empty array
     address: String
   },
-  hasTwoWheeler: { type: Boolean, default: false },
   vehicleType: { type: String, enum: ['Bike', 'Scooter', 'Cycle'] },
   vehicleRegNo: String,
   emergencyContact: {

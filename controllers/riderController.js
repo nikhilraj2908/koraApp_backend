@@ -30,11 +30,10 @@ exports.enrollRider = async (req, res) => {
     const longitude = Number(req.body.longitude);
     const normalizedEmail = (email || '').trim().toLowerCase();
     const normalizedMobile = (mobile || '').replace(/\D/g, '');
-    const hasTwoWheeler =
-      req.body.hasTwoWheeler === 'true' || req.body.hasTwoWheeler === true;
     const declarationsAccepted =
       req.body.declarationsAccepted === 'true' ||
       req.body.declarationsAccepted === true;
+    const isCycle = vehicleType === 'Cycle';
 
     const aadhaarFront = req.files?.aadhaarFront?.[0];
     const aadhaarBack = req.files?.aadhaarBack?.[0];
@@ -79,13 +78,17 @@ exports.enrollRider = async (req, res) => {
       });
     }
 
-    if (
-      hasTwoWheeler &&
-      (!vehicleType || !vehicleRegNo || !drivingLicense || !rc)
-    ) {
+    if (!vehicleType) {
       return res.status(400).json({
         success: false,
-        message: 'Vehicle details, driving license and RC are required',
+        message: 'Vehicle type is required',
+      });
+    }
+
+    if (!isCycle && (!vehicleRegNo || !rc)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vehicle registration number and RC document are required for motorised vehicles',
       });
     }
 
@@ -140,9 +143,8 @@ exports.enrollRider = async (req, res) => {
         name: (emergencyContactName || '').trim(),
         mobile: (emergencyContactMobile || '').replace(/\D/g, ''),
       },
-      hasTwoWheeler,
-      vehicleType: hasTwoWheeler ? vehicleType : undefined,
-      vehicleRegNo: hasTwoWheeler ? vehicleRegNo.trim().toUpperCase() : undefined,
+      vehicleType,
+      vehicleRegNo: !isCycle && vehicleRegNo ? vehicleRegNo.trim().toUpperCase() : undefined,
       documents: {
         aadhaarFront: aadhaarFront?.filename
           ? `/uploads/${aadhaarFront.filename}`
@@ -153,7 +155,9 @@ exports.enrollRider = async (req, res) => {
         drivingLicense: drivingLicense?.filename
           ? `/uploads/${drivingLicense.filename}`
           : drivingLicense?.path || undefined,
-        rc: rc?.filename ? `/uploads/${rc.filename}` : rc?.path || undefined,
+        rc: !isCycle && rc?.filename
+          ? `/uploads/${rc.filename}`
+          : rc?.path || undefined,
         profilePhoto: profilePhoto?.filename
           ? `/uploads/${profilePhoto.filename}`
           : profilePhoto?.path || '',
@@ -242,7 +246,6 @@ exports.updateProfile = async (req, res) => {
       'permanentAddress',
       'preparedLocation',
       'emergencyContact',
-      'hasTwoWheeler',
       'vehicleType',
       'vehicleRegNo',
     ];

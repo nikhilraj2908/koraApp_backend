@@ -64,6 +64,9 @@ exports.register = async (req, res) => {
       shopAddress: req.body.shopAddress.trim(),
       shopPhoto: `/uploads/${shopPhoto.filename}`,
       services,
+      machineCapacity: services.includes('Machine Wash')
+        ? (req.body.machineCapacity || '').trim()
+        : '',
       experience: Number(req.body.experience) || 0,
       aadhaarFront: `/uploads/${aadhaarFront.filename}`,
       aadhaarBack: `/uploads/${aadhaarBack.filename}`,
