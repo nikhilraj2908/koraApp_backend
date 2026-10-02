@@ -28,6 +28,7 @@ const configRoutes = require('./routes/configRoutes');
 const dispatchRoutes = require('./routes/dispatchRoutes');
 const rideOfferRoutes = require('./routes/rideOfferRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const serviceAreaRoutes = require('./routes/serviceAreaRoutes');
 const { getConfig } = require('./repositories/configRepository');
 const mongoose = require('mongoose');
 
@@ -91,6 +92,7 @@ app.use('/api/dispatch/config', configRoutes);
 app.use('/api/dispatch', dispatchRoutes);
 app.use('/api/ride-offers', rideOfferRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/service-areas', serviceAreaRoutes);
 
 // Ensure the dispatch Configuration document exists before any request
 // (grouping/pricing/scheduler) needs to read it.

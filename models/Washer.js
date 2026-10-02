@@ -36,6 +36,12 @@ const WasherSchema = new mongoose.Schema({
     declarationsAccepted: { type: Boolean, required: true, default: false },
     verificationStatus: { type: String, enum: ["pending", "verified", "rejected"], default: "pending" },
     expoPushToken: { type: String, default: null },
+    serviceAreaId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ServiceArea',
+      default: null,
+      index: true,
+    },
     isAvailable: { type: Boolean, default: true },
     isVerified: { type: Boolean, default: false },
 }, { timestamps: true });

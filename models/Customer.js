@@ -20,6 +20,12 @@ const CustomerSchema = new mongoose.Schema({
     coordinates: [Number],
   }],
   defaultAddressId: mongoose.Schema.Types.ObjectId,
+  serviceAreaId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceArea',
+    default: null,
+    index: true,
+  },
   phone: String,          // optional, separate from Account.mobile if needed
   expoPushToken: { type: String, default: null },
   notificationsEnabled: { type: Boolean, default: true },

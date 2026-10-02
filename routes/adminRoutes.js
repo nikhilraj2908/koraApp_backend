@@ -11,6 +11,8 @@ const {
 } = require('../middleware/auth');
 const { PERMISSIONS } = require('../constants/permissions');
 const ctrl = require('../controllers/adminController');
+const serviceAreaCtrl = require('../controllers/serviceAreaController');
+const geoUpload = require('../middleware/geoUpload');
 
 /* ── One-time admin bootstrap — NO login required ─────────────────────
  * Creates the very first super admin. Gated by the ADMIN_BOOTSTRAP_SECRET
@@ -93,5 +95,29 @@ router.get('/customers', requirePermission(PERMISSIONS.VIEW_CUSTOMERS), ctrl.lis
 router.get('/customers/:id', requirePermission(PERMISSIONS.VIEW_CUSTOMERS), ctrl.getCustomerById);
 router.put('/customers/:id', requirePermission(PERMISSIONS.EDIT_CUSTOMERS), ctrl.updateCustomer);
 router.delete('/customers/:id', superAdminOnly, ctrl.deleteCustomer);
+
+/* ── Service Areas — view/manage permissions enforced ───────────────── */
+router.get('/service-areas', requirePermission(PERMISSIONS.VIEW_SERVICE_AREAS), serviceAreaCtrl.listServiceAreas);
+router.post(
+  '/service-areas',
+  requirePermission(PERMISSIONS.MANAGE_SERVICE_AREAS),
+  geoUpload.fields([{ name: 'file', maxCount: 1 }, { name: 'geojson', maxCount: 1 }]),
+  serviceAreaCtrl.createServiceArea
+);
+router.get('/service-areas/:id', requirePermission(PERMISSIONS.VIEW_SERVICE_AREAS), serviceAreaCtrl.getServiceAreaById);
+router.patch('/service-areas/:id/activate', requirePermission(PERMISSIONS.MANAGE_SERVICE_AREAS), serviceAreaCtrl.activateServiceArea);
+router.patch('/service-areas/:id/deactivate', requirePermission(PERMISSIONS.MANAGE_SERVICE_AREAS), serviceAreaCtrl.deactivateServiceArea);
+router.put(
+  '/service-areas/:id/boundary',
+  requirePermission(PERMISSIONS.MANAGE_SERVICE_AREAS),
+  geoUpload.fields([{ name: 'file', maxCount: 1 }, { name: 'geojson', maxCount: 1 }]),
+  serviceAreaCtrl.updateBoundary
+);
+router.patch(
+  '/service-areas/:id/boundary',
+  requirePermission(PERMISSIONS.MANAGE_SERVICE_AREAS),
+  geoUpload.fields([{ name: 'file', maxCount: 1 }, { name: 'geojson', maxCount: 1 }]),
+  serviceAreaCtrl.updateBoundary
+);
 
 module.exports = router;

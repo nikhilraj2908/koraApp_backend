@@ -63,6 +63,23 @@ const absolutizeOrder = (req, orderDoc) => {
     order.clothPhotos.wash = (order.clothPhotos.wash || []).map((p) => absolutize(req, p));
     order.clothPhotos.iron = (order.clothPhotos.iron || []).map((p) => absolutize(req, p));
   }
+  if (order.serviceAreaId) {
+    if (typeof order.serviceAreaId === 'object' && order.serviceAreaId._id) {
+      order.serviceAreaName = order.serviceAreaId.name || null;
+      order.serviceArea = {
+        id: order.serviceAreaId._id,
+        name: order.serviceAreaId.name,
+      };
+    } else {
+      order.serviceArea = {
+        id: order.serviceAreaId,
+        name: order.serviceAreaName || null,
+      };
+    }
+  } else {
+    order.serviceAreaName = null;
+    order.serviceArea = null;
+  }
   return order;
 };
 
@@ -672,6 +689,7 @@ exports.listOrders = async (req, res) => {
         })
         .populate({ path: 'riderPickupId', select: 'fullName' })
         .populate({ path: 'riderDeliveryId', select: 'fullName' })
+        .populate({ path: 'serviceAreaId', select: 'name status' })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -705,7 +723,8 @@ exports.getOrderById = async (req, res) => {
         select: 'fullName phone profilePhoto addresses accountId',
       })
       .populate({ path: 'riderPickupId', select: 'fullName' })
-      .populate({ path: 'riderDeliveryId', select: 'fullName' });
+      .populate({ path: 'riderDeliveryId', select: 'fullName' })
+      .populate({ path: 'serviceAreaId', select: 'name status' });
     if (!order) return fail(res, 'Order not found', 404);
     const absolutized = absolutizeOrder(req, order);
     await enrichOrderCustomer(absolutized);
@@ -760,18 +779,96 @@ exports.assignOrder = async (req, res) => {
     }
 
     const query = resolveOrderQuery(req.params.id);
-    const order = await Order.findOneAndUpdate(
+    const order = await Order.findOne(query);
+    if (!order) return fail(res, 'Order not found', 404);
+
+    // Enforce area consistency for service provider, pickup rider, and delivery rider
+    if (order.serviceAreaId) {
+      const ServiceArea = require('../models/ServiceArea');
+      const { isPointInServiceArea } = require('../utils/geoJsonValidator');
+      const serviceArea = await ServiceArea.findById(order.serviceAreaId);
+      const targetAreaIdStr = order.serviceAreaId.toString();
+
+      if (riderPickupId) {
+        const rider = await Rider.findById(riderPickupId);
+        if (!rider) return fail(res, 'Pickup rider not found', 404);
+
+        if (rider.serviceAreaId) {
+          if (rider.serviceAreaId.toString() !== targetAreaIdStr) {
+            return fail(res, 'Cross-service-area assignment rejected: Pickup rider belongs to a different service area', 422);
+          }
+        } else if (serviceArea && rider.currentLocation?.coordinates) {
+          const inArea = isPointInServiceArea(rider.currentLocation.coordinates, serviceArea.boundary);
+          if (!inArea) {
+            return fail(res, 'Cross-service-area assignment rejected: Pickup rider location is outside the order service area', 422);
+          }
+        } else {
+          return fail(res, 'Cross-service-area assignment rejected: Pickup rider is not in the same service area as this order', 422);
+        }
+      }
+
+      if (riderDeliveryId) {
+        const rider = await Rider.findById(riderDeliveryId);
+        if (!rider) return fail(res, 'Delivery rider not found', 404);
+
+        if (rider.serviceAreaId) {
+          if (rider.serviceAreaId.toString() !== targetAreaIdStr) {
+            return fail(res, 'Cross-service-area assignment rejected: Delivery rider belongs to a different service area', 422);
+          }
+        } else if (serviceArea && rider.currentLocation?.coordinates) {
+          const inArea = isPointInServiceArea(rider.currentLocation.coordinates, serviceArea.boundary);
+          if (!inArea) {
+            return fail(res, 'Cross-service-area assignment rejected: Delivery rider location is outside the order service area', 422);
+          }
+        } else {
+          return fail(res, 'Cross-service-area assignment rejected: Delivery rider is not in the same service area as this order', 422);
+        }
+      }
+
+      if (serviceProviderId) {
+        const ServiceProvider = require('../models/ServiceProvider');
+        let sp = await Washer.findById(serviceProviderId);
+        if (!sp) sp = await ServiceProvider.findById(serviceProviderId);
+        if (!sp) return fail(res, 'Washer / Service Provider not found', 404);
+
+        if (sp.serviceAreaId) {
+          if (sp.serviceAreaId.toString() !== targetAreaIdStr) {
+            return fail(res, 'Cross-service-area assignment rejected: Washer / Service Provider belongs to a different service area', 422);
+          }
+        } else {
+          const coords = (sp.shopLocation || sp.location)?.coordinates;
+          if (serviceArea && coords && Array.isArray(coords) && coords.length === 2) {
+            const inArea = isPointInServiceArea(coords, serviceArea.boundary);
+            if (!inArea) {
+              return fail(res, 'Cross-service-area assignment rejected: Washer / Service Provider location is outside the order service area', 422);
+            }
+          } else {
+            return fail(res, 'Cross-service-area assignment rejected: Washer / Service Provider is not in the same service area as this order', 422);
+          }
+        }
+      }
+    }
+
+    const updatedOrder = await Order.findOneAndUpdate(
       query,
       {
         $set: update,
         $push: { statusHistory: { status: 'reassigned_by_admin', note: 'Reassigned by admin', updatedAt: new Date() } },
       },
       { new: true }
-    );
-    if (!order) return fail(res, 'Order not found', 404);
+    )
+      .populate({
+        path: 'customerId',
+        model: 'Customer',
+        foreignField: 'accountId',
+        select: 'fullName phone profilePhoto addresses accountId',
+      })
+      .populate({ path: 'riderPickupId', select: 'fullName' })
+      .populate({ path: 'riderDeliveryId', select: 'fullName' })
+      .populate({ path: 'serviceAreaId', select: 'name status' });
 
-    emitOrderUpdate(order);
-    ok(res, order);
+    emitOrderUpdate(updatedOrder);
+    ok(res, absolutizeOrder(req, updatedOrder));
   } catch (err) {
     fail(res, err.message);
   }

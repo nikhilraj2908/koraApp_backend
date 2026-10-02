@@ -3,6 +3,8 @@ const Order = require("../models/Order");
 const Service = require("../models/Servicemodel");
 const Customer = require("../models/Customer");
 const Wallet = require("../models/WalletCustomer");
+const ServiceArea = require("../models/ServiceArea");
+const { isPointInServiceArea } = require("../utils/geoJsonValidator");
 
 const {
   emitOrderUpdate,
@@ -257,10 +259,35 @@ exports.createOrder = async (req, res) => {
       }
     }
 
-    if (!pickupLocation) {
-      console.error(
-        `[Dispatch] Order ${orderNumber} created without valid pickup coordinates. It will not be eligible for automatic pickup grouping.`
-      );
+    if (!pickupLocation || !pickupLocation.coordinates) {
+      return res.status(422).json({
+        success: false,
+        message: "Pickup coordinates (latitude and longitude) are required to verify service area coverage.",
+      });
+    }
+
+    const activeServiceArea = await ServiceArea.findOne({ status: "active" });
+    if (!activeServiceArea) {
+      return res.status(422).json({
+        success: false,
+        message: "No service area is currently active. Bookings are temporarily paused.",
+      });
+    }
+
+    const isInsideServiceArea = isPointInServiceArea(
+      pickupLocation.coordinates,
+      activeServiceArea.boundary
+    );
+
+    if (!isInsideServiceArea) {
+      return res.status(422).json({
+        success: false,
+        message: "Pickup location is outside the current KORA service area.",
+        activeServiceArea: {
+          id: activeServiceArea._id,
+          name: activeServiceArea.name,
+        },
+      });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -362,6 +389,7 @@ exports.createOrder = async (req, res) => {
       bookingTime,
       pickupDate,
       pickupSlot,
+      serviceAreaId: activeServiceArea._id,
       dispatchStatus:
         "awaiting_slot",
 

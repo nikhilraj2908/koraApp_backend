@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/**/*.test.js",
     "dev": "nodemon server.js",
     "start": "nodemon server.js"
   },
@@ -13,11 +13,13 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@turf/boolean-point-in-polygon": "^7.4.0",
+    "@turf/helpers": "^7.4.0",
     "axios": "^1.14.0",
-    "dayjs": "^1.11.13",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
+    "dayjs": "^1.11.13",
     "dotenv": "^17.4.0",
     "expo-server-sdk": "^5.0.0",
     "express": "^5.2.1",
@@ -38,6 +40,7 @@
     "twilio": "^5.13.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "supertest": "^7.3.0"
   }
 }

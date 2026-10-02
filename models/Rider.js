@@ -31,6 +31,12 @@ const RiderSchema = new mongoose.Schema({
   totalEarnings: { type: Number, default: 0 },
 
   // ── Dispatch system fields ──
+  serviceAreaId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceArea',
+    default: null,
+    index: true,
+  },
   expoPushToken: { type: String, default: null },
 
   // Live GPS — updated continuously while the rider app is open/tracking

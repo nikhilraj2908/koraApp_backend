@@ -43,6 +43,10 @@ const PERMISSIONS = {
 
   // Platform configuration (dispatch pricing/slots/etc.)
   MANAGE_CONFIG: 'config.manage',
+
+  // Service areas / geospatial boundaries
+  VIEW_SERVICE_AREAS: 'serviceAreas.view',
+  MANAGE_SERVICE_AREAS: 'serviceAreas.manage',
 };
 
 const ALL_PERMISSIONS = Object.values(PERMISSIONS);

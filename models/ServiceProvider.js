@@ -26,6 +26,12 @@ const ServiceProviderSchema = new mongoose.Schema({
     homeLinen: Map,
     premiumDryClean: Map
   },
+  serviceAreaId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceArea',
+    default: null,
+    index: true,
+  },
   isVerified: { type: Boolean, default: false },
   totalEarnings: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now }

@@ -200,6 +200,12 @@ const OrderSchema = new mongoose.Schema({
     default: null,
   },
 
+  serviceAreaId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "ServiceArea",
+    index: true,
+  },
+
   serviceProviderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "ServiceProvider"
@@ -286,6 +292,14 @@ OrderSchema.virtual("deliveryRider", {
   localField: "riderDeliveryId",
   foreignField: "_id",
   justOne: true
+});
+
+// Virtual populate for resolving service area (ServiceArea._id -> Order.serviceAreaId)
+OrderSchema.virtual("serviceArea", {
+  ref: "ServiceArea",
+  localField: "serviceAreaId",
+  foreignField: "_id",
+  justOne: true,
 });
 
 // Virtual alias allowing estimatedDeliveryTime to read/write estimatedDelivery
