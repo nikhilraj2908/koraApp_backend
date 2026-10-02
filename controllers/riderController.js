@@ -124,6 +124,13 @@ exports.enrollRider = async (req, res) => {
       role: 'rider',
     });
 
+    const { findServiceAreaForPoint } = require('../services/serviceAreaService');
+    const match = await findServiceAreaForPoint(longitude, latitude);
+    let matchedServiceAreaId = null;
+    if (match.matched && match.serviceArea) {
+      matchedServiceAreaId = match.serviceArea._id;
+    }
+
     const riderData = {
       accountId: account._id,
       fullName: fullName.trim(),
@@ -134,6 +141,11 @@ exports.enrollRider = async (req, res) => {
       preparedLocation: preferredLocation
         ? { address: preferredLocation.trim() }
         : undefined,
+      baseLocation: {
+        type: 'Point',
+        coordinates: [longitude, latitude],
+      },
+      serviceAreaId: matchedServiceAreaId,
       currentLocation: {
         type: 'Point',
         coordinates: [longitude, latitude],
@@ -261,6 +273,34 @@ exports.updateProfile = async (req, res) => {
     if (typeof updates.currentAddress === 'string') updates.currentAddress = updates.currentAddress.trim();
     if (typeof updates.permanentAddress === 'string') updates.permanentAddress = updates.permanentAddress.trim();
     if (typeof updates.vehicleRegNo === 'string') updates.vehicleRegNo = updates.vehicleRegNo.trim().toUpperCase();
+
+    // Permanent base location assignment and service area resolution
+    if (req.body.baseLocation?.coordinates || (req.body.latitude !== undefined && req.body.longitude !== undefined)) {
+      const bLng = req.body.baseLocation?.coordinates ? Number(req.body.baseLocation.coordinates[0]) : Number(req.body.longitude);
+      const bLat = req.body.baseLocation?.coordinates ? Number(req.body.baseLocation.coordinates[1]) : Number(req.body.latitude);
+
+      const { findServiceAreaForPoint } = require('../services/serviceAreaService');
+      const match = await findServiceAreaForPoint(bLng, bLat);
+
+      if (match.conflict) {
+        return res.status(409).json({
+          success: false,
+          code: 'MULTIPLE_SERVICE_AREAS_MATCH',
+          message: 'This base location falls inside multiple active service areas.',
+        });
+      }
+
+      if (!match.matched || !match.serviceArea) {
+        return res.status(422).json({
+          success: false,
+          code: 'OUTSIDE_SERVICE_AREA',
+          message: 'Rider base location is outside all active KORA service areas.',
+        });
+      }
+
+      updates.baseLocation = { type: 'Point', coordinates: [bLng, bLat] };
+      updates.serviceAreaId = match.serviceArea._id;
+    }
 
     const rider = await Rider.findByIdAndUpdate(
       riderId,

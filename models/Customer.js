@@ -26,10 +26,37 @@ const CustomerSchema = new mongoose.Schema({
     default: null,
     index: true,
   },
+  // Informational / current location context (NOT a permanent city assignment)
+  lastKnownLocation: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      default: undefined,
+    },
+  },
+  lastLocationVerifiedAt: {
+    type: Date,
+    default: null,
+    index: true,
+  },
+  lastKnownServiceAreaId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceArea',
+    default: null,
+    index: true,
+  },
+
   phone: String,          // optional, separate from Account.mobile if needed
   expoPushToken: { type: String, default: null },
   notificationsEnabled: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },
 });
+
+// Geospatial index for customer last known locations
+CustomerSchema.index({ lastKnownLocation: '2dsphere' });
 
 module.exports = mongoose.model('Customer', CustomerSchema);

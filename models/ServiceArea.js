@@ -65,11 +65,7 @@ ServiceAreaSchema.virtual('id').get(function () {
 // Geospatial index on boundary for spatial queries
 ServiceAreaSchema.index({ boundary: '2dsphere' });
 
-// Partial unique index enforcing AT MOST ONE active service area across the platform.
-// Concurrent attempts to activate two areas will trigger a MongoDB duplicate key error.
-ServiceAreaSchema.index(
-  { status: 1 },
-  { unique: true, partialFilterExpression: { status: 'active' } }
-);
+// Non-unique index on status to support multiple active service areas simultaneously.
+ServiceAreaSchema.index({ status: 1 });
 
 module.exports = mongoose.model('ServiceArea', ServiceAreaSchema);

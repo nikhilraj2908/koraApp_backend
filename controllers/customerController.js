@@ -352,3 +352,71 @@ exports.setDefaultAddress = async (req, res) => {
     return fail(res, err.message);
   }
 };
+
+// ─── POST /api/customer/location or /api/customers/location ──────────────────
+// Updates authenticated customer's last known location and checks active service area coverage.
+exports.updateCustomerLocation = async (req, res) => {
+  try {
+    const rawLat = req.body.latitude !== undefined ? req.body.latitude : req.body.lat;
+    const rawLng = req.body.longitude !== undefined ? req.body.longitude : req.body.lng;
+
+    const lat = Number(rawLat);
+    const lng = Number(rawLng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid latitude (-90 to 90) and longitude (-180 to 180) are required.',
+      });
+    }
+
+    const customer = await Customer.findOne({ accountId: req.user.id });
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer profile not found.' });
+    }
+
+    const { findServiceAreaForPoint } = require('../services/serviceAreaService');
+    const matchResult = await findServiceAreaForPoint(lng, lat);
+
+    if (matchResult.conflict) {
+      return res.status(409).json({
+        success: false,
+        code: 'MULTIPLE_SERVICE_AREAS_MATCH',
+        message: 'This location falls inside multiple active service areas.',
+      });
+    }
+
+    // Update customer last known location and timestamp
+    customer.lastKnownLocation = {
+      type: 'Point',
+      coordinates: [lng, lat],
+    };
+    customer.lastLocationVerifiedAt = new Date();
+
+    if (matchResult.matched && matchResult.serviceArea) {
+      customer.lastKnownServiceAreaId = matchResult.serviceArea._id;
+      await customer.save();
+
+      return res.json({
+        success: true,
+        available: true,
+        serviceArea: {
+          id: matchResult.serviceArea._id.toString(),
+          name: matchResult.serviceArea.name,
+        },
+      });
+    }
+
+    // Customer is outside all active service areas
+    customer.lastKnownServiceAreaId = null;
+    await customer.save();
+
+    return res.json({
+      success: true,
+      available: false,
+      serviceArea: null,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};

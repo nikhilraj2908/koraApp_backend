@@ -317,11 +317,35 @@ exports.updateWasherLocation = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid coordinates" });
     }
 
+    const { findServiceAreaForPoint } = require("../services/serviceAreaService");
+    const match = await findServiceAreaForPoint(lng, lat);
+
+    if (match.conflict) {
+      return res.status(409).json({
+        success: false,
+        code: "MULTIPLE_SERVICE_AREAS_MATCH",
+        message: "This shop location falls inside multiple active service areas.",
+      });
+    }
+
+    if (!match.matched || !match.serviceArea) {
+      return res.status(422).json({
+        success: false,
+        code: "OUTSIDE_SERVICE_AREA",
+        message: "Shop location is outside all active KORA service areas.",
+      });
+    }
+
     const washer = await Washer.findByIdAndUpdate(
       req.user.id,
-      { $set: { shopLocation: { type: "Point", coordinates: [lng, lat] } } },
+      {
+        $set: {
+          shopLocation: { type: "Point", coordinates: [lng, lat] },
+          serviceAreaId: match.serviceArea._id,
+        },
+      },
       { new: true }
-    ).select("name shopAddress shopLocation");
+    ).select("name shopAddress shopLocation serviceAreaId");
 
     if (!washer) {
       return res.status(404).json({ success: false, message: "Washer not found" });
@@ -330,7 +354,11 @@ exports.updateWasherLocation = async (req, res) => {
     return res.json({
       success: true,
       message: "Shop location updated",
-      data: { shopLocation: washer.shopLocation },
+      data: {
+        shopLocation: washer.shopLocation,
+        serviceAreaId: washer.serviceAreaId,
+        serviceAreaName: match.serviceArea.name,
+      },
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

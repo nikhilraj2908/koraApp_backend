@@ -39,6 +39,20 @@ const RiderSchema = new mongoose.Schema({
   },
   expoPushToken: { type: String, default: null },
 
+  // Permanent / base location that determines the rider's operational service area.
+  // Distinct from live `currentLocation` which is continuously updated.
+  baseLocation: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point",
+    },
+    coordinates: {
+      type: [Number], // [lng, lat]
+      default: undefined,
+    },
+  },
+
   // Live GPS — updated continuously while the rider app is open/tracking
   // (see services/riderLocationService.js, Phase 2). Distinct from
   // `preparedLocation` above, which is a one-time onboarding address, not
@@ -60,6 +74,7 @@ const RiderSchema = new mongoose.Schema({
 
 // Required for $near/$geoNear nearby-rider discovery queries.
 RiderSchema.index({ currentLocation: "2dsphere" });
+// 2dsphere index for permanent baseLocation queries
+RiderSchema.index({ baseLocation: "2dsphere" });
+
 module.exports = mongoose.model('Rider', RiderSchema);
-// No 2dsphere index – removed
-// module.exports = mongoose.model('Rider', RiderSchema);

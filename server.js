@@ -75,6 +75,7 @@ app.use('/uploads', express.static('uploads'));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api/customer', customerRoutes);
 app.use('/api/riders', riderRoutes);
 app.use('/api/sp', spRoutes);
 app.use('/api/orders', orderRoutes);

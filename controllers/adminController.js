@@ -797,8 +797,9 @@ exports.assignOrder = async (req, res) => {
           if (rider.serviceAreaId.toString() !== targetAreaIdStr) {
             return fail(res, 'Cross-service-area assignment rejected: Pickup rider belongs to a different service area', 422);
           }
-        } else if (serviceArea && rider.currentLocation?.coordinates) {
-          const inArea = isPointInServiceArea(rider.currentLocation.coordinates, serviceArea.boundary);
+        } else if (serviceArea && (rider.baseLocation?.coordinates || rider.currentLocation?.coordinates)) {
+          const coords = rider.baseLocation?.coordinates || rider.currentLocation?.coordinates;
+          const inArea = isPointInServiceArea(coords, serviceArea.boundary);
           if (!inArea) {
             return fail(res, 'Cross-service-area assignment rejected: Pickup rider location is outside the order service area', 422);
           }
@@ -815,8 +816,9 @@ exports.assignOrder = async (req, res) => {
           if (rider.serviceAreaId.toString() !== targetAreaIdStr) {
             return fail(res, 'Cross-service-area assignment rejected: Delivery rider belongs to a different service area', 422);
           }
-        } else if (serviceArea && rider.currentLocation?.coordinates) {
-          const inArea = isPointInServiceArea(rider.currentLocation.coordinates, serviceArea.boundary);
+        } else if (serviceArea && (rider.baseLocation?.coordinates || rider.currentLocation?.coordinates)) {
+          const coords = rider.baseLocation?.coordinates || rider.currentLocation?.coordinates;
+          const inArea = isPointInServiceArea(coords, serviceArea.boundary);
           if (!inArea) {
             return fail(res, 'Cross-service-area assignment rejected: Delivery rider location is outside the order service area', 422);
           }

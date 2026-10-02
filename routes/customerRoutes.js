@@ -10,6 +10,7 @@ const {
   updateAddress,
   deleteAddress,
   setDefaultAddress,
+  updateCustomerLocation,
 } = require('../controllers/customerController');
 
 const { protect, restrictTo } = require('../middleware/auth');
@@ -141,13 +142,15 @@ router.put(
   '/addresses/:addressId/default',
   protect,
   restrictTo('customer'),
-  setDefaultAddress
 );
 
-// router.put(
-//   '/profile/email',
-//   protect,
-//   restrictTo('customer'),
-//   updateEmail
-// );
+// ─── LOCATION ────────────────────────────────────────────
+
+// Update customer last known location & verify active service area coverage
+router.post(
+  '/location',
+  protect,
+  restrictTo('customer'),
+  updateCustomerLocation
+);
 module.exports = router;

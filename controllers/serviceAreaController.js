@@ -75,13 +75,22 @@ exports.getServiceAreaById = async (req, res) => {
 
 /**
  * PATCH /api/admin/service-areas/:id/activate
- * Atomically activates this service area and deactivates any other active area.
+ * Activates this service area without deactivating other active areas.
+ * Checks for boundary overlap with other active areas.
  */
 exports.activateServiceArea = async (req, res) => {
   try {
     const activated = await serviceAreaService.activateServiceArea(req.params.id);
     ok(res, activated);
   } catch (err) {
+    if (err.code === 'SERVICE_AREA_OVERLAP') {
+      return res.status(409).json({
+        success: false,
+        code: 'SERVICE_AREA_OVERLAP',
+        message: err.message,
+        conflictingArea: err.conflictingArea || null,
+      });
+    }
     fail(res, err.message, err.statusCode || 500);
   }
 };
@@ -127,6 +136,14 @@ exports.updateBoundary = async (req, res) => {
 
     ok(res, result);
   } catch (err) {
+    if (err.code === 'SERVICE_AREA_OVERLAP') {
+      return res.status(409).json({
+        success: false,
+        code: 'SERVICE_AREA_OVERLAP',
+        message: err.message,
+        conflictingArea: err.conflictingArea || null,
+      });
+    }
     fail(res, err.message, err.statusCode || 500);
   }
 };
@@ -135,24 +152,19 @@ exports.updateBoundary = async (req, res) => {
 
 /**
  * GET /api/service-areas/active
- * Returns public-safe info of the currently active service area.
+ * Returns public-safe list of ALL currently active service areas.
  */
 exports.getActiveServiceArea = async (req, res) => {
   try {
-    const active = await serviceAreaService.getActiveServiceArea();
-    if (!active) {
-      return res.json({
-        success: true,
-        active: false,
-        data: null,
-        message: 'No active service area available.',
-      });
-    }
+    const activeAreas = await serviceAreaService.getActiveServiceAreas();
+    const hasActive = Array.isArray(activeAreas) && activeAreas.length > 0;
 
-    res.json({
+    return res.json({
       success: true,
-      active: true,
-      data: active,
+      active: hasActive,
+      serviceAreas: activeAreas || [],
+      // Backward compatibility with single-area consumers
+      data: activeAreas,
     });
   } catch (err) {
     fail(res, err.message, err.statusCode || 500);
@@ -161,7 +173,7 @@ exports.getActiveServiceArea = async (req, res) => {
 
 /**
  * POST /api/service-areas/check
- * Checks if a given coordinate point [lng, lat] is covered by the active service area.
+ * Checks if a given coordinate point [lng, lat] is covered by ANY active service area.
  */
 exports.checkCoverage = async (req, res) => {
   try {
@@ -169,9 +181,19 @@ exports.checkCoverage = async (req, res) => {
     const longitude = req.body.longitude !== undefined ? req.body.longitude : req.body.lng;
 
     const result = await serviceAreaService.checkLocationCoverage(latitude, longitude);
-    res.json({
+
+    if (result.conflict) {
+      return res.status(409).json({
+        success: false,
+        code: 'MULTIPLE_SERVICE_AREAS_MATCH',
+        message: result.message || 'This location falls inside multiple active service areas.',
+      });
+    }
+
+    return res.json({
       success: true,
-      ...result,
+      available: result.available,
+      serviceArea: result.serviceArea,
     });
   } catch (err) {
     fail(res, err.message, err.statusCode || 500);
