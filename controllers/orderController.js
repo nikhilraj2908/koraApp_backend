@@ -428,6 +428,23 @@ exports.createOrder = async (req, res) => {
       `[CreateOrder] Order created: ${order.orderNumber}`
     );
 
+    // Silently update customer's lastKnownServiceAreaId so they appear in
+    // service area stats immediately (no separate location ping needed).
+    try {
+      const Customer = require('../models/Customer');
+      await Customer.updateOne(
+        { _id: customerId },
+        {
+          $set: {
+            lastKnownServiceAreaId: resolvedServiceArea._id,
+            lastLocationVerifiedAt: new Date(),
+          },
+        }
+      );
+    } catch (_) {
+      // Non-fatal — order is already created
+    }
+
     // NOTE: Individual orders are NO LONGER immediately broadcast to washers.
     // Orders now enter the slot grouping queue (dispatchStatus: awaiting_slot)
     // and are collected with other orders in the same slot window. At slot

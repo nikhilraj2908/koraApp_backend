@@ -3,6 +3,7 @@ const Washer = require("../models/Washer");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { notifyAdmins } = require("../utils/notification");
+const { findServiceAreaForPoint } = require("../services/serviceAreaService");
 
 const generateToken = (id) =>
   jwt.sign({ id, role: "washer" }, process.env.JWT_SECRET, { expiresIn: "7d" });
@@ -54,6 +55,24 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message });
     }
 
+    // Resolve GPS coordinates → service area
+    const rawLat = parseFloat(req.body.latitude);
+    const rawLng = parseFloat(req.body.longitude);
+    let resolvedShopLocation = undefined;
+    let resolvedServiceAreaId = null;
+
+    if (Number.isFinite(rawLat) && Number.isFinite(rawLng)) {
+      resolvedShopLocation = { type: 'Point', coordinates: [rawLng, rawLat] };
+      try {
+        const match = await findServiceAreaForPoint(rawLng, rawLat);
+        if (match.matched && match.serviceArea) {
+          resolvedServiceAreaId = match.serviceArea._id;
+        }
+      } catch (_) {
+        // non-fatal — washer is still registered without area assignment
+      }
+    }
+
     const washer = await Washer.create({
       name: normalizedName,
       phone: normalizedPhone,
@@ -62,6 +81,8 @@ exports.register = async (req, res) => {
       dob: new Date(req.body.dob),
       gender: req.body.gender,
       shopAddress: req.body.shopAddress.trim(),
+      shopLocation: resolvedShopLocation,
+      serviceAreaId: resolvedServiceAreaId,
       shopPhoto: `/uploads/${shopPhoto.filename}`,
       services,
       machineCapacity: services.includes('Machine Wash')
