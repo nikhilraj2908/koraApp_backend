@@ -6,11 +6,13 @@ const {
   verifyResetOtp,
   resetPassword,
   logout,
-  verifyEmail,               // new
-  resendVerificationOtp,     // new
-  googleAuth                 // new
+  verifyEmail,
+  resendVerificationOtp,
+  googleAuth,
+  changePassword,
 } = require('../controllers/authController');
 const { authLimiter, resetLimiter } = require('../middleware/rateLimiter');
+const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -26,4 +28,7 @@ router.post('/verify-reset-otp', resetLimiter, verifyResetOtp);
 router.post('/reset-password', resetLimiter, resetPassword);
 router.post('/logout', logout);
 
-module.exports = router;
+// Protected — only works when authenticated (allow through even when mustChangePassword=true)
+router.post('/change-password', protect, changePassword);
+
+module.exports = router;

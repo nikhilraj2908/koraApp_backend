@@ -679,6 +679,12 @@ exports.listOrders = async (req, res) => {
       if (to) query.createdAt.$lte = new Date(to);
     }
 
+    // Service-area scoping: managers only see orders in their assigned areas.
+    // req.scopedServiceAreaIds is null for super admin (unrestricted).
+    if (req.scopedServiceAreaIds !== null && req.scopedServiceAreaIds !== undefined) {
+      query.serviceAreaId = { $in: req.scopedServiceAreaIds };
+    }
+
     const [orders, total] = await Promise.all([
       Order.find(query)
         .populate({
@@ -726,6 +732,13 @@ exports.getOrderById = async (req, res) => {
       .populate({ path: 'riderDeliveryId', select: 'fullName' })
       .populate({ path: 'serviceAreaId', select: 'name status' });
     if (!order) return fail(res, 'Order not found', 404);
+
+    // Object-level service-area check for managers.
+    const { canAccessServiceArea } = require('../middleware/auth');
+    if (!canAccessServiceArea(req, order.serviceAreaId)) {
+      return fail(res, 'SERVICE_AREA_ACCESS_DENIED', 403);
+    }
+
     const absolutized = absolutizeOrder(req, order);
     await enrichOrderCustomer(absolutized);
     ok(res, absolutized);
@@ -916,6 +929,11 @@ exports.listRiders = async (req, res) => {
     const query = {};
     if (req.query.status) query.verificationStatus = req.query.status;
 
+    // Service-area scoping
+    if (req.scopedServiceAreaIds !== null && req.scopedServiceAreaIds !== undefined) {
+      query.serviceAreaId = { $in: req.scopedServiceAreaIds };
+    }
+
     const [riders, total] = await Promise.all([
       Rider.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
       Rider.countDocuments(query),
@@ -938,6 +956,10 @@ exports.getRiderById = async (req, res) => {
   try {
     const rider = await Rider.findById(req.params.id);
     if (!rider) return fail(res, 'Rider not found', 404);
+    const { canAccessServiceArea } = require('../middleware/auth');
+    if (!canAccessServiceArea(req, rider.serviceAreaId)) {
+      return fail(res, 'SERVICE_AREA_ACCESS_DENIED', 403);
+    }
     ok(res, absolutizeRider(req, rider));
   } catch (err) {
     fail(res, err.message);
@@ -1036,6 +1058,11 @@ exports.listWashers = async (req, res) => {
     const query = {};
     if (req.query.status) query.verificationStatus = req.query.status;
 
+    // Service-area scoping
+    if (req.scopedServiceAreaIds !== null && req.scopedServiceAreaIds !== undefined) {
+      query.serviceAreaId = { $in: req.scopedServiceAreaIds };
+    }
+
     const [washers, total] = await Promise.all([
       Washer.find(query).select('-password').sort({ createdAt: -1 }).skip(skip).limit(limit),
       Washer.countDocuments(query),
@@ -1058,6 +1085,10 @@ exports.getWasherById = async (req, res) => {
   try {
     const washer = await Washer.findById(req.params.id).select('-password');
     if (!washer) return fail(res, 'Washer not found', 404);
+    const { canAccessServiceArea } = require('../middleware/auth');
+    if (!canAccessServiceArea(req, washer.serviceAreaId)) {
+      return fail(res, 'SERVICE_AREA_ACCESS_DENIED', 403);
+    }
     ok(res, absolutizeWasher(req, washer));
   } catch (err) {
     fail(res, err.message);

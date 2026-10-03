@@ -25,12 +25,17 @@ const AccountSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    // 'admin'    = super admin — full, unrestricted access.
-    // 'subadmin' = created by a super admin, scoped to whatever
-    //              permissions are granted on their models/Admin.js profile.
-    enum: ['customer', 'rider', 'serviceProvider', 'admin', 'subadmin'],
+    // 'admin'              = super admin — full, unrestricted access.
+    // 'subadmin'           = created by a super admin, scoped to permissions.
+    // 'regional_manager'   = like subadmin but tied to specific service areas.
+    enum: ['customer', 'rider', 'serviceProvider', 'admin', 'subadmin', 'regional_manager'],
     required: true,
   },
+  // Set true when admin creates an account with a temporary password.
+  // The user must change their password before accessing any other APIs.
+  mustChangePassword: { type: Boolean, default: false },
+  // Updated on every successful login.
+  lastLoginAt: { type: Date, default: null },
   isVerified: {
     type: Boolean,
     default: false,      // email sign‑up must verify via OTP; Google users are set to true

@@ -41,7 +41,7 @@ const initSocket = (httpServer) => {
     }
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     console.log('Socket connected:', socket.id);
 
     // join_order — customer app se aata hai
@@ -83,13 +83,147 @@ const initSocket = (httpServer) => {
       console.log(`[Socket] Rider ${riderId} joined rider_room`);
     });
 
-    // admin bell — verified admin/subadmin (role decoded from the JWT
-    // during the handshake above) auto-joins their own notification room.
-    // No client-side join event needed: just connect with the token.
-    if (socket.userId && (socket.role === 'admin' || socket.role === 'subadmin')) {
+    // admin bell — verified admin/subadmin/regional_manager auto-joins notification room.
+    const ADMIN_ROLES_SOCKET = ['admin', 'subadmin', 'regional_manager'];
+    if (socket.userId && ADMIN_ROLES_SOCKET.includes(socket.role)) {
       socket.join(`admin_notifications_${socket.userId}`);
       console.log(`[Socket] Admin ${socket.userId} joined their notification room`);
+
+      // Auto-join all chat conversation rooms this user is a participant in.
+      try {
+        const Conversation = require('../models/Conversation');
+        const mongoose = require('mongoose');
+        if (mongoose.Types.ObjectId.isValid(socket.userId)) {
+          const convos = await Conversation.find(
+            { participants: new mongoose.Types.ObjectId(socket.userId) },
+            '_id'
+          ).lean();
+          for (const c of convos) {
+            socket.join(`chat_${c._id}`);
+          }
+          console.log(`[Socket] Admin ${socket.userId} joined ${convos.length} chat room(s)`);
+        }
+      } catch (err) {
+        console.error('[Socket] Failed to auto-join chat rooms:', err.message);
+      }
     }
+
+    // ── Chat: join a specific conversation room ─────────────────────────
+    // Client sends: { conversationId }
+    // Server verifies the caller is a participant before allowing join.
+    socket.on('chat:join', async ({ conversationId }) => {
+      if (!socket.userId) {
+        socket.emit('chat:error', { message: 'Not authenticated' });
+        return;
+      }
+      try {
+        const Conversation = require('../models/Conversation');
+        const mongoose = require('mongoose');
+        if (!mongoose.Types.ObjectId.isValid(conversationId)) return;
+
+        const convo = await Conversation.findOne({
+          _id: conversationId,
+          participants: new mongoose.Types.ObjectId(socket.userId),
+        });
+        if (!convo) {
+          socket.emit('chat:error', { message: 'CHAT_ACCESS_DENIED' });
+          return;
+        }
+        socket.join(`chat_${conversationId}`);
+        console.log(`[Socket] ${socket.userId} joined chat room: chat_${conversationId}`);
+      } catch (err) {
+        console.error('[Socket] chat:join error:', err.message);
+      }
+    });
+
+    // ── Chat: send a message via socket ────────────────────────────────
+    // Client sends: { conversationId, text }
+    // Message is persisted FIRST, then broadcast.
+    socket.on('chat:message', async ({ conversationId, text }) => {
+      if (!socket.userId) {
+        socket.emit('chat:error', { message: 'Not authenticated' });
+        return;
+      }
+      try {
+        const Conversation = require('../models/Conversation');
+        const ChatMessage = require('../models/ChatMessage');
+        const mongoose = require('mongoose');
+
+        if (!mongoose.Types.ObjectId.isValid(conversationId)) return;
+        if (!text || !text.trim()) {
+          socket.emit('chat:error', { message: 'Message cannot be empty' });
+          return;
+        }
+        if (text.length > 4000) {
+          socket.emit('chat:error', { message: 'Message too long' });
+          return;
+        }
+
+        const convo = await Conversation.findOne({
+          _id: conversationId,
+          participants: new mongoose.Types.ObjectId(socket.userId),
+        });
+        if (!convo) {
+          socket.emit('chat:error', { message: 'CHAT_ACCESS_DENIED' });
+          return;
+        }
+
+        // Persist first
+        const message = await ChatMessage.create({
+          conversationId: convo._id,
+          senderId: socket.userId,
+          text: text.trim(),
+          readBy: [socket.userId],
+        });
+
+        // Update conversation metadata
+        convo.lastMessageAt = message.createdAt;
+        convo.lastMessageText = text.trim().substring(0, 200);
+        await convo.save();
+
+        // Broadcast to all participants in the room
+        io.to(`chat_${conversationId}`).emit('chat:newMessage', {
+          conversationId,
+          message: message.toObject(),
+        });
+      } catch (err) {
+        console.error('[Socket] chat:message error:', err.message);
+      }
+    });
+
+    // ── Chat: mark messages as read ─────────────────────────────────────
+    socket.on('chat:read', async ({ conversationId }) => {
+      if (!socket.userId) return;
+      try {
+        const Conversation = require('../models/Conversation');
+        const ChatMessage = require('../models/ChatMessage');
+        const mongoose = require('mongoose');
+
+        if (!mongoose.Types.ObjectId.isValid(conversationId)) return;
+
+        const convo = await Conversation.findOne({
+          _id: conversationId,
+          participants: new mongoose.Types.ObjectId(socket.userId),
+        });
+        if (!convo) return;
+
+        await ChatMessage.updateMany(
+          {
+            conversationId: convo._id,
+            senderId: { $ne: socket.userId },
+            readBy: { $ne: socket.userId },
+          },
+          { $addToSet: { readBy: socket.userId } }
+        );
+
+        io.to(`chat_${conversationId}`).emit('chat:read', {
+          conversationId,
+          readBy: socket.userId,
+        });
+      } catch (err) {
+        console.error('[Socket] chat:read error:', err.message);
+      }
+    });
 
     socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);

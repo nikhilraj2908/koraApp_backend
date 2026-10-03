@@ -235,14 +235,13 @@ exports.login = async (req, res) => {
     } else {
       const normalizedIdentifier = normalizeMobile(identifier);
       account = await Account.findOne({ mobile: normalizedIdentifier });
-      // try full digits if not found
       if (!account && normalizedIdentifier.length >= 10) {
         account = await Account.findOne({ mobile: normalizedIdentifier.slice(-10) });
       }
     }
 
     if (!account) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
     }
 
     // 🔒 Check if account is verified
@@ -255,11 +254,45 @@ exports.login = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, account.password);
     if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
     }
 
+    // Update lastLoginAt
+    account.lastLoginAt = new Date();
+    await account.save();
+
     const token = generateToken(account._id, account.role);
-    res.json({ token, role: account.role });
+
+    // For admin/subadmin/regional_manager, include profile metadata.
+    const ADMIN_ROLES = ['admin', 'subadmin', 'regional_manager'];
+    if (ADMIN_ROLES.includes(account.role)) {
+      const Admin = require('../models/Admin');
+      const { ALL_PERMISSIONS } = require('../constants/permissions');
+      const adminProfile = await Admin.findOne({ accountId: account._id });
+
+      if (adminProfile && !adminProfile.isActive) {
+        return res.status(403).json({ error: 'ACCOUNT_INACTIVE', message: 'Account has been deactivated' });
+      }
+
+      return res.json({
+        token,
+        role: account.role,
+        mustChangePassword: account.mustChangePassword || false,
+        user: {
+          id: account._id,
+          email: account.email,
+          mobile: account.mobile,
+          fullName: adminProfile?.fullName || null,
+          level: adminProfile?.level || account.role,
+          permissions: adminProfile?.level === 'admin' ? ALL_PERMISSIONS : (adminProfile?.permissions || []),
+          serviceAreaIds: adminProfile?.serviceAreaIds || [],
+          isActive: adminProfile?.isActive ?? true,
+          lastLoginAt: account.lastLoginAt,
+        },
+      });
+    }
+
+    res.json({ token, role: account.role, mustChangePassword: account.mustChangePassword || false });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -427,3 +460,38 @@ exports.resetPassword = async (req, res) => {
 exports.logout = (req, res) => {
   res.json({ message: 'Logged out successfully' });
 };
+
+// ─── 10. CHANGE PASSWORD (for admin/subadmin/regional_manager) ───────────
+// Must be authenticated. Clears mustChangePassword after success.
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+
+    const account = await Account.findById(req.user.id);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+
+    const isMatch = await bcrypt.compare(currentPassword, account.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Current password is incorrect' });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'New password must be different from current password' });
+    }
+
+    account.password = await bcrypt.hash(newPassword, 10);
+    account.mustChangePassword = false;
+    await account.save();
+
+    res.json({ message: 'Password changed successfully. Please log in again.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+};
